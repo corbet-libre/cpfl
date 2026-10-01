@@ -1,0 +1,36 @@
+[package]
+name = "cpfl"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "LGPL-3.0-only WITH LGPL-3.0-linking-exception"
+repository = "https://github.com/corbet-foss/cpfl"
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+cprz = { git = "https://github.com/corbet-foss/cprz", branch = "main", default-features = false }
+cprz-pad = { git = "https://github.com/corbet-foss/cprz", branch = "main" }
+cgrd = { git = "https://github.com/corbet-foss/cgrd", branch = "main", default-features = false }
+cshm = { git = "https://github.com/corbet-foss/cshm", branch = "main" }
+csgn = { git = "https://github.com/corbet-foss/csgn", branch = "main", default-features = false }
+cpns = { git = "https://github.com/corbet-foss/cpns", branch = "main", default-features = false }
+ckmg = { git = "https://github.com/corbet-foss/ckmg", branch = "main" }
+cnvl = { git = "https://github.com/corbet-foss/cnvl", branch = "main" }
+cwst = { git = "https://github.com/corbet-foss/cwst", branch = "main" }
+blake3 = "1"
+ed25519-dalek = { version = "3", default-features = false, features = ["fast"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+zeroize = "1"
+
+[dev-dependencies]
+csgn = { git = "https://github.com/corbet-foss/csgn", branch = "main", default-features = false, features = ["volatile-signer"] }
+futures-executor = "0.3"
+wasm-bindgen-test = "0.3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
