@@ -9,12 +9,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci
+  cancel-in-progress: false
+  queue: max
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_BUILD_JOBS: "2"
+  WASM_BINDGEN_TEST_TIMEOUT: "120"
 jobs:
   native:
     runs-on: ubuntu-24.04
@@ -105,10 +107,70 @@ jobs:
           tool: cargo-llvm-cov
       - name: Measure reachable native lines and branches
         run: cargo llvm-cov --locked --branch --json --output-path coverage.json --ignore-filename-regex '/tests/'
+      - name: Export line-level coverage evidence
+        run: cargo llvm-cov report --lcov --output-path coverage.lcov --ignore-filename-regex '/tests/'
       - name: Enforce complete measured coverage
-        run: python3 .github/scripts/check-coverage.py coverage.json
+        run: python3 .github/scripts/check-coverage.py coverage.lcov
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage
-          path: coverage.json
+          path: |
+            coverage.json
+            coverage.lcov
+
+  wasm-coverage:
+    needs: wasm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: python3 .github/scripts/browser-coverage-runner.py
+      CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: -Zno-profiler-runtime -Clink-args=--no-gc-sections --cfg=owned_browser_coverage
+      WASM_BINDGEN_TEST_ONLY_WEB: "1"
+      WASM_BINDGEN_SPLIT_LINKED_MODULES: "1"
+      CHROMEDRIVER: /usr/bin/chromedriver
+      CC_wasm32_unknown_unknown: clang
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: dependency-lock
+      # Experimental upstream coverage runs on current nightly; product builds remain stable.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-coverage
+      - id: binding-version
+        run: |
+          python3 - <<'PYCODE'
+          import os, tomllib
+          packages = tomllib.load(open('Cargo.lock', 'rb'))['package']
+          version = next(p['version'] for p in packages if p['name'] == 'wasm-bindgen')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('version=' + version + '\n')
+          PYCODE
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov,wasm-bindgen-cli@${{ steps.binding-version.outputs.version }}
+      - name: Report instrumentation versions
+        run: |
+          rustc --version --verbose
+          cargo llvm-cov --version
+          clang --version
+      - name: Install maintained browser driver
+        run: python3 -m pip install -r .github/requirements.txt
+      - name: Measure actual browser Rust lines and branches
+        run: cargo llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lcov --output-path wasm-coverage.lcov --ignore-filename-regex '/tests/'
+      - name: Enforce actual browser Rust coverage
+        run: python3 .github/scripts/check-coverage.py wasm-coverage.lcov wasm
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wasm-coverage
+          path: wasm-coverage.lcov

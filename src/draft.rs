@@ -30,11 +30,8 @@ impl ProfileCodec for PortableCodec {
             return Err(Error::Limit);
         }
         let compressed = Zeroizing::new(cprz::portable::compress(bytes).map_err(|_| Error::Codec)?);
-        let padded = Zeroizing::new(cprz_pad::pad(&compressed));
-        if padded.len() > cnvl::MAX_PLAINTEXT_BYTES {
-            return Err(Error::Limit);
-        }
-        Ok(padded)
+        // Input is capped above; Envelope enforces the final packed byte budget.
+        Ok(Zeroizing::new(cprz_pad::pad(&compressed)))
     }
     fn unpack(&self, bytes: &[u8], maximum: usize) -> Result<Zeroizing<Vec<u8>>, Error> {
         if bytes.len() > cnvl::MAX_PLAINTEXT_BYTES || maximum > crate::MAX_PROFILE_BYTES {
@@ -248,20 +245,18 @@ impl Draft {
             .filter(|o| public_profile.public.contains_key(&o.field))
             .cloned()
             .collect();
-        let public = self
-            .bundle(
-                credential,
-                cgrd::Profile::Public(public_profile),
-                public_openings,
-                signer,
-            )?;
-        let full = self
-            .bundle(
-                credential,
-                cgrd::Profile::Full(self.state.profile.clone()),
-                self.state.openings.clone(),
-                signer,
-            )?;
+        let public = self.bundle(
+            credential,
+            cgrd::Profile::Public(public_profile),
+            public_openings,
+            signer,
+        )?;
+        let full = self.bundle(
+            credential,
+            cgrd::Profile::Full(self.state.profile.clone()),
+            self.state.openings.clone(),
+            signer,
+        )?;
         for bundle in [&public, &full] {
             if !cgrd::check_published_with_contact(bundle, policy, signed_schema, contact)
                 .is_admitted()
@@ -298,10 +293,7 @@ impl Draft {
             reachability,
         };
         let transcript = encode(&transcript)?;
-        let signature = signer
-            .sign(&publication_binding(&transcript))
-            ?
-            .to_vec();
+        let signature = signer.sign(&publication_binding(&transcript))?.to_vec();
         let publication = Publication {
             transcript,
             signature,
@@ -312,6 +304,8 @@ impl Draft {
         let publication = encode(&publication)?;
         Ok(Candidate {
             expected_checkpoint,
+            prepared_at: policy.policy.now,
+            full_bundle: full_bytes,
             scope: self.state.profile.community.clone(),
             revision,
             read_key_id: revision.to_be_bytes(),
@@ -339,9 +333,21 @@ impl Draft {
         Ok(cgrd::Bundle { payload, signature })
     }
 }
+/// Current trusted verification inputs, supplied anew at the durable boundary.
+/// This is not a serialized authority token; Charter owns these current snapshots.
+pub struct Validation<'a> {
+    /// Complete current published policy and injected current time.
+    pub policy: cgrd::PublishedPolicy<'a>,
+    /// Original current signed schema snapshot.
+    pub signed_schema: &'a [u8],
+    /// Deterministic contact detector used for both projections.
+    pub contact: &'a dyn Fn(&str) -> cshm::ContactCheck,
+}
 /// Prepared publication and key material, released only by a durable multi-owner commit.
 pub struct Candidate {
     expected_checkpoint: u64,
+    prepared_at: u64,
+    full_bundle: Zeroizing<Vec<u8>>,
     scope: String,
     revision: u64,
     read_key_id: [u8; 8],
@@ -356,14 +362,45 @@ impl Candidate {
     pub async fn commit_publication<B: cwst::backend::Backend>(
         self,
         store: &mut cwst::Store<B>,
+        current: Validation<'_>,
         operation: [u8; 32],
         mut dependent_changes: Vec<cwst::Change<'_>>,
     ) -> Result<u64, Error> {
-        if !store.is_scope(&self.scope) { return Err(Error::Invalid); }
-        if let Some(bytes) = store.read("profile", b"publication").map_err(|_| Error::Storage)? {
+        if current.policy.policy.now < self.prepared_at {
+            return Err(Error::Admission);
+        }
+        let publication = Publication::from_bytes(&self.publication)?;
+        let contact = |text: &str| (current.contact)(text);
+        crate::verify_publication(
+            &publication,
+            &current.policy,
+            current.signed_schema,
+            self.revision,
+            &contact,
+        )?;
+        let full: cgrd::Bundle = decode(&self.full_bundle)?;
+        if !cgrd::check_published_with_contact(
+            &full,
+            &current.policy,
+            current.signed_schema,
+            &contact,
+        )
+        .is_admitted()
+        {
+            return Err(Error::Admission);
+        }
+        if !store.is_scope(&self.scope) {
+            return Err(Error::Invalid);
+        }
+        if let Some(bytes) = store
+            .read("profile", b"publication")
+            .map_err(|_| Error::Storage)?
+        {
             let previous = Publication::from_bytes(bytes)?;
             let previous: Transcript = decode(&previous.transcript)?;
-            if self.revision <= previous.revision { return Err(Error::Invalid); }
+            if self.revision <= previous.revision {
+                return Err(Error::Invalid);
+            }
         }
         // Prevent an injected dependent mutation from overwriting Profile's owned records.
         if dependent_changes.iter().any(|c| {

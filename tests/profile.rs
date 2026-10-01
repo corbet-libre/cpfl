@@ -45,7 +45,7 @@ fn schema() -> cshm::Schema {
             {"id":"hobby","label":"Hobby","kind":{"type":"choice","options":[{"id":"reading","label":"Reading"}]},"required":false,"filterable":true,"change_preset":"free","no_contact_details":false},
             {"id":"place","label":"Place","kind":{"type":"location"},"required":false,"filterable":true,"change_preset":"free","no_contact_details":false}
         ],
-        "private":[{"id":"secret","label":"Secret","kind":{"type":"yes_no"},"required":true,"filterable":false,"change_preset":"occasional","no_contact_details":false}]
+        "private":[{"id":"secret","label":"Secret","kind":{"type":"yes_no"},"required":true,"filterable":false,"change_preset":"occasional","no_contact_details":false},{"id":"private_bio","label":"Private biography","kind":{"type":"short_text","min_length":0,"max_length":100},"required":false,"filterable":false,"change_preset":"free","no_contact_details":true}]
     })).unwrap()
 }
 fn profile() -> cshm::Profile {
@@ -53,13 +53,18 @@ fn profile() -> cshm::Profile {
         community: "garden".into(),
         schema_version: 1,
         public: [("age".into(), json!(34)), ("bio".into(), json!("reading"))].into(),
-        private: [("secret".into(), json!(true))].into(),
+        private: [
+            ("secret".into(), json!(true)),
+            ("private_bio".into(), json!("secret text")),
+        ]
+        .into(),
     }
 }
 fn clean(_: &str) -> cshm::ContactCheck {
     cshm::ContactCheck::Clear
 }
 struct Auth {
+    community: String,
     keys: csgn::KeyRing,
     settings: Vec<u8>,
     schema: Vec<u8>,
@@ -68,14 +73,19 @@ struct Auth {
 }
 impl Auth {
     fn new(draft: &mut Draft, device: &Device) -> Self {
+        Self::named(draft, device, "garden", "alice")
+    }
+    fn named(draft: &mut Draft, device: &Device, community: &str, member: &str) -> Self {
+        let mut definition = schema();
+        definition.community = community.into();
         let pins = draft
-            .prepare_pins(&schema(), &clean, &mut SystemEntropy)
+            .prepare_pins(&definition, &clean, &mut SystemEntropy)
             .unwrap();
         let mut issuer =
-            Signer::new("garden", SecretKey::from_seed(&mut [11; 32]), 1000, 10000).unwrap();
+            Signer::new(community, SecretKey::from_seed(&mut [11; 32]), 1000, 10000).unwrap();
         let credential = cgrd::Credential {
-            community: "garden".into(),
-            member: "alice".into(),
+            community: community.into(),
+            member: member.into(),
             handle: "mountain".into(),
             schema_version: 1,
             policy_epoch: 2,
@@ -91,17 +101,18 @@ impl Auth {
         let credential = sign(Kind::Credential, serde_json::to_value(&credential).unwrap());
         let schema = sign(
             Kind::SchemaSnapshot,
-            json!({"community":"garden","revision":1,"policy_epoch":2,"content":schema()}),
+            json!({"community":community,"revision":1,"policy_epoch":2,"content":definition}),
         );
         let settings = sign(
             Kind::SettingsSnapshot,
-            json!({"community":"garden","revision":1,"policy_epoch":2,"content":{"action/admission":{"all_of":[],"any_of":[],"k_of_n":null,"maximum_proof_age":null,"membership":["admitted"]}}}),
+            json!({"community":community,"revision":1,"policy_epoch":2,"content":{"action/admission":{"all_of":[],"any_of":[],"k_of_n":null,"maximum_proof_age":null,"membership":["admitted"]}}}),
         );
         let revocations = sign(
             Kind::RevocationListSnapshot,
-            json!({"community":"garden","revision":1,"policy_epoch":2,"content":{"members":[],"devices":[]}}),
+            json!({"community":community,"revision":1,"policy_epoch":2,"content":{"members":[],"devices":[]}}),
         );
         Self {
+            community: community.into(),
             keys: issuer.key_ring().clone(),
             settings,
             schema,
@@ -109,10 +120,17 @@ impl Auth {
             credential,
         }
     }
+    fn validation(&self) -> cpfl::Validation<'_> {
+        cpfl::Validation {
+            policy: self.policy(),
+            signed_schema: &self.schema,
+            contact: &clean,
+        }
+    }
     fn policy(&self) -> cgrd::PublishedPolicy<'_> {
         cgrd::PublishedPolicy {
             policy: cgrd::Policy {
-                community: "garden",
+                community: &self.community,
                 keys: &self.keys,
                 now: 1100,
                 minimum_epoch: 2,
@@ -135,21 +153,20 @@ async fn prepare(
     version: u64,
     revision: u64,
 ) -> Result<cpfl::Candidate, Error> {
-    draft
-        .prepare_publication(
-            &auth.credential,
-            &auth.policy(),
-            &auth.schema,
-            revision,
-            1,
-            vec![1, 2],
-            version,
-            device,
-            cipher,
-            &PortableCodec,
-            &mut SystemEntropy,
-            &clean,
-        )
+    draft.prepare_publication(
+        &auth.credential,
+        &auth.policy(),
+        &auth.schema,
+        revision,
+        1,
+        vec![1, 2],
+        version,
+        device,
+        cipher,
+        &PortableCodec,
+        &mut SystemEntropy,
+        &clean,
+    )
 }
 shared!(signed_projection_checkpoint_and_peer_round_trip, {
     let mut draft = Draft::new("alice".into(), profile()).unwrap();
@@ -179,6 +196,7 @@ shared!(signed_projection_checkpoint_and_peer_round_trip, {
     candidate
         .commit_publication(
             &mut store,
+            auth.validation(),
             [1; 32],
             vec![cwst::Change::Put {
                 owner: "contacts",
@@ -238,7 +256,7 @@ shared!(signed_projection_checkpoint_and_peer_round_trip, {
         .await
         .unwrap();
     second
-        .commit_publication(&mut store, [3; 32], vec![])
+        .commit_publication(&mut store, auth.validation(), [3; 32], vec![])
         .await
         .unwrap();
     assert!(
@@ -290,7 +308,7 @@ shared!(restricted_edits_require_fresh_accepted_pins_and_fences, {
     store.commit(0, [9; 32], &[], &[]).await.unwrap();
     assert_eq!(
         candidate
-            .commit_publication(&mut store, [1; 32], vec![])
+            .commit_publication(&mut store, fresh.validation(), [1; 32], vec![])
             .await
             .unwrap_err(),
         Error::Storage
@@ -303,6 +321,7 @@ shared!(restricted_edits_require_fresh_accepted_pins_and_fences, {
         candidate
             .commit_publication(
                 &mut store,
+                fresh.validation(),
                 [1; 32],
                 vec![cwst::Change::Delete {
                     owner: "profile",
@@ -325,7 +344,7 @@ shared!(outer_tampering_and_stale_policy_refuse, {
     prepare(&draft, &auth, &mut device, &cipher, 0, 1)
         .await
         .unwrap()
-        .commit_publication(&mut store, [1; 32], vec![])
+        .commit_publication(&mut store, auth.validation(), [1; 32], vec![])
         .await
         .unwrap();
     let wire = store.load_pending().unwrap()[0].bytes.clone();
@@ -446,3 +465,475 @@ shared!(typed_schema_contact_and_codec_bounds, {
             .is_err()
     );
 });
+
+shared!(draft_and_publication_resource_refusals, {
+    assert!(matches!(
+        Draft::new("".into(), profile()),
+        Err(Error::Invalid)
+    ));
+    assert!(matches!(
+        Draft::new("m".repeat(257), profile()),
+        Err(Error::Invalid)
+    ));
+    let mut draft = Draft::new("alice".into(), profile()).unwrap();
+    let mut foreign = profile();
+    foreign.community = "other".into();
+    assert_eq!(draft.edit(foreign).unwrap_err(), Error::Invalid);
+    let mut large = profile();
+    large
+        .public
+        .insert("bio".into(), json!("x".repeat(cpfl::MAX_PROFILE_BYTES)));
+    assert_eq!(draft.edit(large).unwrap_err(), Error::Limit);
+    assert_eq!(
+        draft
+            .set_rules(vec![
+                cgrd::Rule::Block {
+                    member: "peer".into()
+                };
+                cgrd::MAX_ITEMS + 1
+            ])
+            .unwrap_err(),
+        Error::Limit
+    );
+    assert!(Draft::from_checkpoint(b"malformed").is_err());
+    let mut definition = schema();
+    let mut optional = definition.private[0].clone();
+    optional.id = "optional".into();
+    optional.required = false;
+    definition.private.push(optional);
+    assert_eq!(
+        draft
+            .prepare_pins(&definition, &clean, &mut SystemEntropy)
+            .unwrap()
+            .len(),
+        2
+    );
+    let mut device = device();
+    let auth = Auth::new(&mut draft, &device);
+    let cipher = cipher();
+    for (revision, generation, reachability) in [
+        (0, 1, vec![]),
+        (1, 0, vec![]),
+        (1, 1, vec![0; cpfl::MAX_REACHABILITY_BYTES + 1]),
+    ] {
+        assert!(matches!(
+            draft.prepare_publication(
+                &auth.credential,
+                &auth.policy(),
+                &auth.schema,
+                revision,
+                generation,
+                reachability,
+                0,
+                &mut device,
+                &cipher,
+                &PortableCodec,
+                &mut SystemEntropy,
+                &clean
+            ),
+            Err(Error::Invalid)
+        ));
+    }
+    let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+        .await
+        .unwrap();
+    prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+        .await
+        .unwrap()
+        .commit_publication(&mut store, auth.validation(), [1; 32], vec![])
+        .await
+        .unwrap();
+    let repeated = prepare(&draft, &auth, &mut device, &cipher, 1, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        repeated
+            .commit_publication(&mut store, auth.validation(), [2; 32], vec![])
+            .await
+            .unwrap_err(),
+        Error::Invalid
+    );
+    let mut other = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "other")
+        .await
+        .unwrap();
+    let wrong = prepare(&draft, &auth, &mut device, &cipher, 0, 2)
+        .await
+        .unwrap();
+    assert_eq!(
+        wrong
+            .commit_publication(&mut other, auth.validation(), [2; 32], vec![])
+            .await
+            .unwrap_err(),
+        Error::Invalid
+    );
+    let mut publication = Publication::from_bytes(&store.load_pending().unwrap()[0].bytes).unwrap();
+    publication.signature = vec![0; cpfl::MAX_PROFILE_BYTES + 1];
+    assert_eq!(publication.to_bytes().unwrap_err(), Error::Limit);
+    publication.signature = vec![0; 64];
+    publication.envelope = vec![1; cpfl::MAX_PROFILE_BYTES];
+    assert_eq!(publication.to_bytes().unwrap_err(), Error::Limit);
+});
+
+async fn fixture_publication(
+    community: &str,
+    member: &str,
+    seed: u8,
+) -> (Auth, Device, Publication, cnvl::ReadKey, cgrd::Bundle) {
+    let mut answers = profile();
+    answers.community = community.into();
+    let mut draft = Draft::new(member.into(), answers).unwrap();
+    let mut device = Device(SigningKey::from_bytes(&[seed; 32]));
+    let auth = Auth::named(&mut draft, &device, community, member);
+    let cipher = cipher();
+    let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, community)
+        .await
+        .unwrap();
+    prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+        .await
+        .unwrap()
+        .commit_publication(&mut store, auth.validation(), [1; 32], vec![])
+        .await
+        .unwrap();
+    let publication = Publication::from_bytes(&store.load_pending().unwrap()[0].bytes).unwrap();
+    let verified =
+        cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, 1, &clean).unwrap();
+    let key = cnvl::ReadKey::unwrap(
+        &cipher,
+        verified.context(),
+        store
+            .read("profile.keys", &1u64.to_be_bytes())
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    let packed = cnvl::open(
+        &cnvl::Envelope::from_bytes(&publication.envelope).unwrap(),
+        &key,
+        &verified.context(),
+    )
+    .unwrap();
+    let full = serde_json::from_slice(
+        &PortableCodec
+            .unpack(&packed, cpfl::MAX_PROFILE_BYTES)
+            .unwrap(),
+    )
+    .unwrap();
+    (auth, device, publication, key, full)
+}
+fn resign(publication: &mut Publication, device: &mut Device) {
+    let mut transcript: Transcript = serde_json::from_slice(&publication.transcript).unwrap();
+    transcript.public_digest = *blake3::hash(&publication.public_bundle).as_bytes();
+    transcript.encrypted_digest = *blake3::hash(&publication.envelope).as_bytes();
+    publication.transcript = serde_json::to_vec(&transcript).unwrap();
+    publication.signature = device
+        .sign(&cpfl::publication_binding(&publication.transcript))
+        .unwrap()
+        .to_vec();
+}
+fn reseal(
+    publication: &mut Publication,
+    device: &mut Device,
+    context: cnvl::Context,
+    full: &cgrd::Bundle,
+) -> cnvl::ReadKey {
+    let packed = PortableCodec
+        .pack(&serde_json::to_vec(full).unwrap())
+        .unwrap();
+    let (envelope, key) = cnvl::seal(
+        cnvl::SealKey::generate(&mut SystemEntropy).unwrap(),
+        context,
+        &packed,
+        &mut SystemEntropy,
+    )
+    .unwrap();
+    publication.envelope = envelope.to_bytes().unwrap();
+    resign(publication, device);
+    key
+}
+shared!(full_presentations_cannot_be_spliced_or_relabelled, {
+    let (auth, mut device, publication, key, full) =
+        fixture_publication("garden", "alice", 22).await;
+    let original = publication.to_bytes().unwrap();
+    let verified =
+        cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, 1, &clean).unwrap();
+    for field in 0..2 {
+        let mut tampered = Publication::from_bytes(&original).unwrap();
+        if field == 0 {
+            tampered.public_bundle[0] ^= 1;
+        } else {
+            tampered.envelope[0] ^= 1;
+        }
+        assert!(matches!(
+            cpfl::open_full(
+                &tampered,
+                &verified,
+                &key,
+                &PortableCodec,
+                &auth.policy(),
+                &auth.schema,
+                &clean
+            ),
+            Err(Error::Invalid)
+        ));
+    }
+    for (community, member, seed) in [
+        ("other", "alice", 22),
+        ("garden", "bob", 22),
+        ("garden", "alice", 23),
+    ] {
+        let (other_auth, _, _, _, other_full) = fixture_publication(community, member, seed).await;
+        let mut substituted = Publication::from_bytes(&original).unwrap();
+        let other_key = reseal(
+            &mut substituted,
+            &mut device,
+            verified.context(),
+            &other_full,
+        );
+        let bound = cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean)
+            .unwrap();
+        assert!(matches!(
+            cpfl::open_full(
+                &substituted,
+                &bound,
+                &other_key,
+                &PortableCodec,
+                &other_auth.policy(),
+                &other_auth.schema,
+                &clean
+            ),
+            Err(Error::Invalid)
+        ));
+    }
+    let mut substituted = Publication::from_bytes(&original).unwrap();
+    let public: cgrd::Bundle = serde_json::from_slice(&substituted.public_bundle).unwrap();
+    let wrong_scope_key = reseal(&mut substituted, &mut device, verified.context(), &public);
+    let bound =
+        cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean).unwrap();
+    assert!(matches!(
+        cpfl::open_full(
+            &substituted,
+            &bound,
+            &wrong_scope_key,
+            &PortableCodec,
+            &auth.policy(),
+            &auth.schema,
+            &clean
+        ),
+        Err(Error::Invalid)
+    ));
+    let mut edited = full.clone();
+    let mut body: cgrd::BundleContent = serde_json::from_slice(&edited.payload).unwrap();
+    let cgrd::Profile::Full(ref mut answers) = body.profile else {
+        panic!("full fixture")
+    };
+    answers
+        .public
+        .insert("bio".into(), json!("changed public projection"));
+    edited.payload = serde_json::to_vec(&body).unwrap();
+    edited.signature = device
+        .sign(&cgrd::binding_bytes(&edited.payload))
+        .unwrap()
+        .to_vec();
+    let edited_key = reseal(&mut substituted, &mut device, verified.context(), &edited);
+    let bound =
+        cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean).unwrap();
+    assert!(matches!(
+        cpfl::open_full(
+            &substituted,
+            &bound,
+            &edited_key,
+            &PortableCodec,
+            &auth.policy(),
+            &auth.schema,
+            &clean
+        ),
+        Err(Error::Invalid)
+    ));
+    edited.signature[0] ^= 1;
+    let edited_key = reseal(&mut substituted, &mut device, verified.context(), &edited);
+    let bound =
+        cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean).unwrap();
+    assert!(matches!(
+        cpfl::open_full(
+            &substituted,
+            &bound,
+            &edited_key,
+            &PortableCodec,
+            &auth.policy(),
+            &auth.schema,
+            &clean
+        ),
+        Err(Error::Admission)
+    ));
+    let mut wrong_context = verified.context();
+    wrong_context.owner = "other".into();
+    reseal(&mut substituted, &mut device, wrong_context, &full);
+    assert!(matches!(
+        cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean),
+        Err(Error::Invalid)
+    ));
+    substituted = Publication::from_bytes(&original).unwrap();
+    substituted.public_bundle = serde_json::to_vec(&full).unwrap();
+    resign(&mut substituted, &mut device);
+    assert!(matches!(
+        cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean),
+        Err(Error::Invalid)
+    ));
+});
+
+shared!(delayed_commit_rechecks_current_admission_and_clock, {
+    let mut draft = Draft::new("alice".into(), profile()).unwrap();
+    let mut device = device();
+    let auth = Auth::new(&mut draft, &device);
+    let cipher = cipher();
+    let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+        .await
+        .unwrap();
+    for now in [1099, 2000] {
+        let candidate = prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+            .await
+            .unwrap();
+        let mut current = auth.validation();
+        current.policy.policy.now = now;
+        assert_eq!(
+            candidate
+                .commit_publication(&mut store, current, [1; 32], vec![])
+                .await
+                .unwrap_err(),
+            Error::Admission
+        );
+        assert_eq!(store.version().unwrap(), 0);
+        assert!(store.load_pending().unwrap().is_empty());
+    }
+});
+
+shared!(current_contact_check_covers_the_private_projection, {
+    let mut draft = Draft::new("alice".into(), profile()).unwrap();
+    let mut device = device();
+    let auth = Auth::new(&mut draft, &device);
+    let cipher = cipher();
+    let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+        .await
+        .unwrap();
+    let candidate = prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+        .await
+        .unwrap();
+    let current_contact = |text: &str| {
+        if text == "secret text" {
+            cshm::ContactCheck::Unavailable
+        } else {
+            cshm::ContactCheck::Clear
+        }
+    };
+    let mut current = auth.validation();
+    current.contact = &current_contact;
+    assert_eq!(
+        candidate
+            .commit_publication(&mut store, current, [1; 32], vec![])
+            .await
+            .unwrap_err(),
+        Error::Admission
+    );
+    assert_eq!(store.version().unwrap(), 0);
+    assert!(store.load_pending().unwrap().is_empty());
+});
+
+/// Fail only the external entropy source; all preceding crypto is real.
+struct FailEntropy(usize);
+impl ckmg::Entropy for FailEntropy {
+    fn fill(&mut self, bytes: &mut [u8]) -> Result<(), ckmg::Error> {
+        if self.0 == 0 {
+            return Err(ckmg::Error::Unavailable);
+        }
+        self.0 -= 1;
+        ckmg::Entropy::fill(&mut SystemEntropy, bytes)
+    }
+}
+shared!(envelope_entropy_failures_never_release_a_candidate, {
+    let mut draft = Draft::new("alice".into(), profile()).unwrap();
+    let mut device = device();
+    let auth = Auth::new(&mut draft, &device);
+    for fail_after in 0..3 {
+        let result = draft.prepare_publication(
+            &auth.credential,
+            &auth.policy(),
+            &auth.schema,
+            1,
+            1,
+            vec![],
+            0,
+            &mut device,
+            &cipher(),
+            &PortableCodec,
+            &mut FailEntropy(fail_after),
+            &clean,
+        );
+        assert!(matches!(result, Err(Error::Crypto)));
+    }
+});
+
+shared!(current_schema_rules_and_locked_storage_refuse, {
+    let mut draft = Draft::new("alice".into(), profile()).unwrap();
+    let mut device = device();
+    let auth = Auth::new(&mut draft, &device);
+    let cipher = cipher();
+    assert!(matches!(
+        draft.prepare_publication(
+            &auth.credential,
+            &auth.policy(),
+            b"invalid signed schema",
+            1,
+            1,
+            vec![],
+            0,
+            &mut device,
+            &cipher,
+            &PortableCodec,
+            &mut SystemEntropy,
+            &clean,
+        ),
+        Err(Error::Admission)
+    ));
+    let candidate = prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+        .await
+        .unwrap();
+    let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+        .await
+        .unwrap();
+    store.lock_in_place();
+    assert_eq!(
+        candidate
+            .commit_publication(&mut store, auth.validation(), [1; 32], vec![])
+            .await
+            .unwrap_err(),
+        Error::Storage
+    );
+    draft
+        .set_rules(vec![cgrd::Rule::Block {
+            member: String::new(),
+        }])
+        .unwrap();
+    assert_eq!(
+        draft.validate(&schema(), &clean).unwrap_err(),
+        Error::Schema
+    );
+    let (auth, mut device, mut publication, _, _) =
+        fixture_publication("garden", "alice", 22).await;
+    let mut transcript: Transcript = serde_json::from_slice(&publication.transcript).unwrap();
+    transcript.rules = vec![cgrd::Rule::Block {
+        member: String::new(),
+    }];
+    publication.transcript = serde_json::to_vec(&transcript).unwrap();
+    resign(&mut publication, &mut device);
+    assert!(matches!(
+        cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, 1, &clean),
+        Err(Error::Schema)
+    ));
+});
+
+// Link the maintained profiling runtime only into the instrumented test binary.
+#[cfg(all(target_arch = "wasm32", owned_browser_coverage))]
+#[wasm_bindgen_test::wasm_bindgen_test]
+fn profiling_runtime_is_linked() {
+    let _ = browser_coverage_runtime::__owned_test_module_signature();
+}

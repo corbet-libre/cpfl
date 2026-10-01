@@ -33,8 +33,10 @@ Switchboard and Exchange must require those owner capabilities separately.
 
 Candidate retains private draft bytes, wrapped per-publication read key and
 public outbox bytes. It is bound to the checkpoint version observed before
-preparation. `commit_publication` commits them together with dependent owner
-changes through cwst's atomic fence; it exposes no publication on failure.
+preparation. `commit_publication` takes fresh `Validation` inputs, refuses clock
+regression, and reruns Guard on both original signed projections before committing
+with dependent owner changes through cwst's atomic fence. It exposes no publication
+on failure. Preparation-time success cannot authorize an expired credential.
 Trusted Charter updates and dependent changes must share that checkpoint fence.
 Reopen and inspect committed operation/outbox after any unknown result. Keys
 never appear in a public output. The previous published revision remains valid

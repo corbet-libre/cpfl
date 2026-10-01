@@ -2,7 +2,7 @@
 
 CI measures production Rust lines and branches with cargo-llvm-cov and requires
 100% of both. A zero-count report fails. Test harness files are excluded from the
-production denominator. No production paths are excluded at this stage. Browser
+production denominator. Browser
 vectors execute in headless Chrome; a compile check is not execution evidence.
 Native coverage does not establish coverage of wasm-only adapters.
 
@@ -11,3 +11,31 @@ experimental branch instrumentation. CI resolves dependencies once and uploads
 Cargo.lock; all jobs consume that exact snapshot with --locked. Weekly CI refreshes
 the snapshot and Dependabot proposes manifest/lock updates. A failed coverage gate
 is an open requirement, never evidence of complete coverage.
+
+Actual browser Rust coverage runs the same owner vectors through wasm-bindgen
+minicov on current nightly. Upstream instrumentation failures remain red and
+are reported separately from stable browser execution.
+Stable Rust separately builds and executes the product vectors. Native and wasm
+line/branch gates are independent; neither substitutes for the other. LCOV
+merges generic instantiations at the source-line boundary and preserves every
+measured branch. The JSON report remains available as diagnostic evidence.
+
+## Current browser profiling runtime
+
+The test-only `.github/coverage-runtime` adapter calls maintained minicov directly
+through its published semver range. wasm-bindgen-test currently fixes its optional
+profiling dependency to minicov 0.3.8 for LLVM 22; current minicov implements the
+LLVM 23 profile format. The CI job reports compiler/runtime versions, disables
+only wasm-bindgen-test's obsolete optional profiler, and instruments the same
+real browser tests. Selenium drives the original upstream test server, waits for
+all tests, invokes the tiny test-only capture binding, and waits for the original
+server's successful nonempty profile upload before closing Chrome. LLVM still
+parses and checks the actual raw profile and enforces every measured line/branch.
+No production API, counter implementation, profile format, synthetic report or
+version impersonation is introduced. A version mismatch or missing capture fails.
+
+Current cargo-llvm-cov supplies instrumentation through its workspace wrapper.
+The target flags deliberately omit a duplicate global `-Cinstrument-coverage`,
+which would also instrument foreign standalone cdylibs without a test runtime.
+Every owned source file and test target remains instrumented by the maintained
+wrapper; third-party source is outside this library's coverage denominator.

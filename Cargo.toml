@@ -8,7 +8,9 @@ repository = "https://github.com/corbet-foss/cpfl"
 publish = false
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib"]
+# All behavior vectors are integration tests; there is no separate unit harness.
+test = false
 
 [dependencies]
 cprz = { git = "https://github.com/corbet-foss/cprz", branch = "main", default-features = false }
@@ -34,3 +36,7 @@ wasm-bindgen-test = "0.3"
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+browser-coverage-runtime = { path = ".github/coverage-runtime" }

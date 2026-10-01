@@ -58,7 +58,15 @@ impl std::fmt::Debug for Publication {
 impl Publication {
     /// Encode an untrusted publication; still requires verify_publication on receipt.
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        if [&self.transcript, &self.signature, &self.public_bundle, &self.envelope].iter().any(|v| v.len() > crate::MAX_PROFILE_BYTES) {
+        if [
+            &self.transcript,
+            &self.signature,
+            &self.public_bundle,
+            &self.envelope,
+        ]
+        .iter()
+        .any(|v| v.len() > crate::MAX_PROFILE_BYTES)
+        {
             return Err(Error::Limit);
         }
         encode(self)
@@ -66,7 +74,12 @@ impl Publication {
     /// Bound serialized input before parsing. There is no public Deserialize path.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let wire: PublicationWire = decode(bytes)?;
-        Ok(Self { transcript: wire.transcript, signature: wire.signature, public_bundle: wire.public_bundle, envelope: wire.envelope })
+        Ok(Self {
+            transcript: wire.transcript,
+            signature: wire.signature,
+            public_bundle: wire.public_bundle,
+            envelope: wire.envelope,
+        })
     }
 }
 /// Exact signature framing; Ed25519 performs signing and verification.
@@ -90,7 +103,9 @@ impl VerifiedPublication {
         &self.public
     }
     /// Guard's authenticated profile/rule projection for reciprocal checks.
-    pub fn participant(&self) -> &cgrd::Participant { &self.participant }
+    pub fn participant(&self) -> &cgrd::Participant {
+        &self.participant
+    }
     /// Exact Envelope context for authorized peer opening.
     pub fn context(&self) -> cnvl::Context {
         cnvl::Context {
@@ -141,16 +156,24 @@ pub fn verify_publication(
     }
     let signature = Signature::from_slice(&publication.signature).map_err(|_| Error::Crypto)?;
     VerifyingKey::from_bytes(&body.device)
-        .map_err(|_| Error::Crypto)?
-        .verify_strict(&publication_binding(&publication.transcript), &signature)
+        .and_then(|key| {
+            key.verify_strict(&publication_binding(&publication.transcript), &signature)
+        })
         .map_err(|_| Error::Crypto)?;
     let schema = authenticated_schema(policy, signed_schema)?;
-    let participant = cgrd::Participant::with_contact(&body.member, &public, &schema, &transcript.rules, contact)
-        .map_err(|_| Error::Schema)?;
+    let participant =
+        cgrd::Participant::with_contact(&body.member, &public, &schema, &transcript.rules, contact)
+            .map_err(|_| Error::Schema)?;
     // Parse now to refuse malformed ciphertext before Switchboard retains it.
-    let verified = VerifiedPublication { transcript, public, participant };
+    let verified = VerifiedPublication {
+        transcript,
+        public,
+        participant,
+    };
     let envelope = cnvl::Envelope::from_bytes(&publication.envelope).map_err(|_| Error::Invalid)?;
-    if !envelope.matches_context(&verified.context()) { return Err(Error::Invalid); }
+    if !envelope.matches_context(&verified.context()) {
+        return Err(Error::Invalid);
+    }
     Ok(verified)
 }
 pub(crate) fn authenticated_schema(

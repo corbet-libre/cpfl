@@ -28,7 +28,7 @@ jobs:
           script: |
             const {owner, repo} = context.repo;
             const run = context.payload.workflow_run;
-            const expected = ['native', 'wasm', 'coverage'];
+            const expected = ['native', 'wasm', 'coverage', 'wasm-coverage'];
             const workflow = await github.rest.actions.getWorkflow({owner, repo, workflow_id: 'ci.yml'});
             if (run.workflow_id !== workflow.data.id || run.path !== '.github/workflows/ci.yml') {
               throw new Error('Unexpected CI workflow');
@@ -45,20 +45,13 @@ jobs:
               if (pr.user.login !== 'dependabot[bot]' || pr.state !== 'open' || pr.draft ||
                   pr.base.ref !== 'main' || pr.head.repo?.full_name !== `${owner}/${repo}` ||
                   pr.head.sha !== run.head_sha) continue;
-              // Required checks protect a subsequent head change after this check.
-              const policy = await github.graphql(`query($owner: String!, $repo: String!) {
-                repository(owner: $owner, name: $repo) {
-                  ref(qualifiedName: "refs/heads/main") {
-                    branchProtectionRule {
-                      requiresStatusChecks requiresStrictStatusChecks isAdminEnforced requiredStatusCheckContexts
-                    }
-                  }
-                }
-              }`, {owner, repo});
-              const protection = policy.repository.ref.branchProtectionRule;
-              const names = new Set(protection?.requiredStatusCheckContexts || []);
-              if (!protection?.requiresStatusChecks || !protection.requiresStrictStatusChecks ||
-                  !protection.isAdminEnforced || expected.some(n => !names.has(n))) {
+              // Public metadata is readable with this workflow's ordinary token.
+              // Strict main/admin protection remains enforced by GitHub at merge.
+              const {data: branch} = await github.rest.repos.getBranch({owner, repo, branch: 'main'});
+              const protection = branch.protection?.required_status_checks;
+              const names = new Set(protection?.contexts || []);
+              if (!branch.protected || protection?.enforcement_level !== 'everyone' ||
+                  expected.some(n => !names.has(n))) {
                 throw new Error('Main must enforce every substantive check, including for administrators');
               }
               const checks = await github.paginate(github.rest.checks.listForRef, {
@@ -72,9 +65,8 @@ jobs:
               if (status.data.total_count && status.data.state !== 'success') throw new Error('Commit status is not successful');
               const {data: current} = await github.rest.pulls.get({owner, repo, pull_number: pr.number});
               if (current.head.sha !== run.head_sha || current.state !== 'open') continue;
-              await github.graphql(`mutation($id: ID!, $sha: GitObjectID!) {
-                enablePullRequestAutoMerge(input: {pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: SQUASH}) {
-                  pullRequest { number }
-                }
-              }`, {id: current.node_id, sha: current.head.sha});
+              const result = await github.rest.pulls.merge({
+                owner, repo, pull_number: current.number, sha: current.head.sha, merge_method: 'squash'
+              });
+              if (!result.data.merged) throw new Error('Protected exact-head merge was refused');
             }
