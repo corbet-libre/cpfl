@@ -23,7 +23,7 @@ measured branch. The JSON report remains available as diagnostic evidence.
 ## Current browser profiling runtime
 
 The test-only `.github/coverage-runtime` adapter calls maintained minicov directly
-through its published semver range. wasm-bindgen-test currently fixes its optional
+from its maintained upstream master branch. wasm-bindgen-test currently fixes its optional
 profiling dependency to minicov 0.3.8 for LLVM 22; current minicov implements the
 LLVM 23 profile format. The CI job reports compiler/runtime versions, disables
 only wasm-bindgen-test's obsolete optional profiler, and instruments the same
@@ -39,3 +39,12 @@ The target flags deliberately omit a duplicate global `-Cinstrument-coverage`,
 which would also instrument foreign standalone cdylibs without a test runtime.
 Every owned source file and test target remains instrumented by the maintained
 wrapper; third-party source is outside this library's coverage denominator.
+
+The published minicov 0.3.9 semver range was tested with wasm-bindgen-test 0.3.79.
+Cargo refuses its overlap with the runner's optional exact minicov 0.3.8. With an
+older unrestricted test range it instead downgraded wasm-bindgen-test to 0.3.45;
+that is explicitly rejected. The test harness requires the current 0.3.79-or-newer
+protocol. A separate upstream git source is used solely to separate these Cargo
+package identities. The obsolete runner profiler is disabled; only the maintained
+current runtime is linked into the instrumented test. There is no patched version
+number, compiler pin or product dependency on this helper.

@@ -31,7 +31,7 @@ zeroize = "1"
 [dev-dependencies]
 csgn = { git = "https://github.com/corbet-foss/csgn", branch = "main", default-features = false, features = ["volatile-signer"] }
 futures-executor = "0.3"
-wasm-bindgen-test = "0.3"
+wasm-bindgen-test = "0.3.79"
 
 [lints.rust]
 unsafe_code = "forbid"
