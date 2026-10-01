@@ -204,6 +204,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+dependencies = [
+ "minicov 0.3.9",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -252,7 +260,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cgrd"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cgrd?branch=main#9f10d3a78b45b261512de86d4474112da0926813"
+source = "git+https://github.com/corbet-foss/cgrd?branch=main#efbc07feea484d1a69ed5a46b27cfefe39c4c551"
 dependencies = [
  "bigdecimal",
  "cpns",
@@ -360,7 +368,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 [[package]]
 name = "cnvl"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cnvl?branch=main#34352ba3ac608aea740232b451c7f351e4abd9a9"
+source = "git+https://github.com/corbet-foss/cnvl?branch=main#14dcabd259c8b16d6e719b2ee8d7e524d7dc2997"
 dependencies = [
  "chacha20poly1305",
  "ckmg",
@@ -396,6 +404,7 @@ name = "cpfl"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "browser-coverage-runtime",
  "cgrd",
  "ckmg",
  "cnvl",
@@ -543,7 +552,7 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cwst?branch=main#1e3b964468aa9c18ab933842767008fadcbfc87e"
+source = "git+https://github.com/corbet-foss/cwst?branch=main#e9a49b74dae64c772fb11a518fc59e6ccee7a4a4"
 dependencies = [
  "atomicwrites",
  "blake3",
@@ -1154,6 +1163,15 @@ name = "minicov"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4869b6a491569605d66d3952bcdf03df789e5b536e5f0cf7758a7f08a55ae24d"
+dependencies = [
+ "cc",
+ "walkdir",
+]
+
+[[package]]
+name = "minicov"
+version = "0.3.9"
+source = "git+https://github.com/Amanieu/minicov?branch=master#03886b886ce16b9309ddd38e4824970e70fc0588"
 dependencies = [
  "cc",
  "walkdir",
@@ -2049,7 +2067,7 @@ dependencies = [
  "cast",
  "js-sys",
  "libm",
- "minicov",
+ "minicov 0.3.8",
  "nu-ansi-term",
  "num-traits",
  "oorandom",
