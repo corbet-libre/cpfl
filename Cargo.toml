@@ -19,7 +19,7 @@ cgrd = { git = "https://github.com/corbet-foss/cgrd", branch = "main", default-f
 cshm = { git = "https://github.com/corbet-foss/cshm", branch = "main" }
 csgn = { git = "https://github.com/corbet-foss/csgn", branch = "main", default-features = false }
 cpns = { git = "https://github.com/corbet-foss/cpns", branch = "main", default-features = false }
-ckmg = { git = "https://github.com/corbet-foss/ckmg", branch = "main" }
+ckmg = { git = "https://github.com/corbet-foss/ckmg", branch = "main", features = ["profile-envelope"] }
 cnvl = { git = "https://github.com/corbet-foss/cnvl", branch = "main" }
 cwst = { git = "https://github.com/corbet-foss/cwst", branch = "main" }
 blake3 = "1"
