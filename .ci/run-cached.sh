@@ -25,8 +25,31 @@ mkdir -p .moon/cache
 ln -sfn "$state/moon-cache/hashes" .moon/cache/hashes
 ln -sfn "$state/moon-cache/outputs" .moon/cache/outputs
 tool_source=github:NixOS/nixpkgs/b7c2ada94fe99c15b0dbcf4d11fd7850b957a436
-tool_paths=$(nix build --no-link --print-out-paths "$tool_source#moon" "$tool_source#proto" "$tool_source#python3" "$tool_source#nodejs_24" "$tool_source#wasm-pack" "$tool_source#chromedriver" "$tool_source#chromium" "$tool_source#clang")
+tool_paths=$(nix build --no-link --print-out-paths "$tool_source#moon" "$tool_source#proto" "$tool_source#nodejs_24" "$tool_source#wasm-pack" "$tool_source#chromedriver" "$tool_source#chromium" "$tool_source#clang" "$tool_source#cargo-llvm-cov")
 for path in $tool_paths; do PATH="$path/bin:$PATH"; done
+# minicov's build script hardcodes `clang`, so every wasm32 C build uses
+# whatever `clang` resolves on PATH (currently the x86_64 nix wrapper, which
+# breaks on host glibc headers). Resolve the pinned unwrapped compiler here
+# (actual closure path from Nix at runtime, never a hardcoded store path) and
+# export it for the cache fingerprint + the wasm legs in verify.sh. It stays
+# off the global PATH so native builds keep the wrapper.
+CPFL_WASM_CLANG_BIN=""
+for out in $(nix build --no-link --print-out-paths "$tool_source#llvmPackages.clang-unwrapped"); do
+  if [ -x "$out/bin/clang" ]; then CPFL_WASM_CLANG_BIN="$out/bin"; fi
+done
+test -n "$CPFL_WASM_CLANG_BIN" || { echo 'pinned unwrapped clang provides no bin/clang' >&2; exit 2; }
+export CPFL_WASM_CLANG_BIN
+export CPFL_WASM_CLANG="$CPFL_WASM_CLANG_BIN/clang"
+"$CPFL_WASM_CLANG" --version
+# .github/requirements.txt needs selenium plus a working pip; the pinned
+# python alone provides neither as usable modules here, so supply a pinned
+# python3.withPackages env (selenium plus transitive deps and pip). Same
+# nixpkgs revision; the 4.40.0 selenium satisfies the >=4 floor, and the
+# verify `pip install` then succeeds as a fast no-op.
+python_env=$(nix build --no-link --print-out-paths --impure --expr '(builtins.getFlake "'"$tool_source"'").legacyPackages.${builtins.currentSystem}.python3.withPackages (p: [ p.selenium p.pip ])')
+test -n "$python_env" || { echo 'nix python selenium env resolution failed' >&2; exit 2; }
+PATH="$python_env/bin:$PATH"
+python3 -c 'import selenium; print(selenium.__version__)'
 export PROTO_HOME="$toolchains/proto" RUSTUP_HOME="$toolchains/rustup"
 export CARGO_HOME="$toolchains/cargo" MOON_HOME="$state/moon-home"
 export PROTO_AUTO_CLEAN=false PROTO_TELEMETRY=false PROTO_YES=true

@@ -8,6 +8,7 @@ project = "cpfl"
 kind = "commands"
 commands = [["bash", ".ci/verify.sh"]]
 cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["python3", "--version"], ["node", "--version"], ["wasm-pack", "--version"], ["chromedriver", "--version"], ["chromium", "--version"], ["clang", "--version"], ["rustup", "run", "nightly", "rustc", "-vV"], ["rustup", "run", "nightly", "cargo", "llvm-cov", "--version"]]
+cache_env = ["CPFL_WASM_CLANG"]
 cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt", "wasm-coverage.json", "wasm-coverage.lcov", "wasm-coverage.txt"]
 
 [render]
