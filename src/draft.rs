@@ -1,7 +1,7 @@
 use crate::{
     Error, Publication, Transcript, VerifiedPublication, decode, encode, publication_binding,
 };
-use ckmg::{Entropy, passkey::StoreCipher};
+use ckmg::Entropy;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -10,8 +10,27 @@ use zeroize::{Zeroize, Zeroizing};
 pub trait DeviceSigner {
     /// Community-local public key; Guard checks its credential authorization.
     fn public_key(&self) -> [u8; 32];
+    /// Actual X25519 public key of the same opaque device custody. Both profile
+    /// projections include this field inside their original device signature.
+    fn hpke_public_key(&self) -> Result<[u8; 32], Error>;
     /// Sign exact domain-framed bytes with the authorized device capability.
     fn sign(&mut self, bytes: &[u8]) -> Result<[u8; 64], Error>;
+}
+
+// This adapter deliberately accepts only the lineage-device capability. Derived
+// purpose signers cannot stand in for the credential-authorized Profile device.
+impl DeviceSigner for ckmg::DeviceEd25519Signer<'_> {
+    fn public_key(&self) -> [u8; 32] {
+        *self.public_key()
+    }
+
+    fn hpke_public_key(&self) -> Result<[u8; 32], Error> {
+        ckmg::DeviceEd25519Signer::hpke_public_key(self).map_err(|_| Error::Crypto)
+    }
+
+    fn sign(&mut self, bytes: &[u8]) -> Result<[u8; 64], Error> {
+        ckmg::DeviceEd25519Signer::sign(self, bytes).map_err(|_| Error::Crypto)
+    }
 }
 /// Compression port for cprz's maintained bounded codec and Padme implementation.
 /// The production implementation is PortableCodec, using maintained Brotli and Padme.
@@ -224,9 +243,8 @@ impl Draft {
         reachability: Vec<u8>,
         expected_checkpoint: u64,
         signer: &mut impl DeviceSigner,
-        cipher: &StoreCipher,
+        custody: &cnvl::Custodian<'_>,
         codec: &impl ProfileCodec,
-        entropy: &mut impl Entropy,
         contact: &impl Fn(&str) -> cshm::ContactCheck,
     ) -> Result<Candidate, Error> {
         if revision == 0
@@ -274,11 +292,16 @@ impl Draft {
             schema_revision: u64::from(self.state.profile.schema_version),
             key_generation,
         };
-        let key = cnvl::SealKey::generate(entropy).map_err(|_| Error::Crypto)?;
-        let (envelope, read_key) =
-            cnvl::seal(key, context, &packed, entropy).map_err(|_| Error::Crypto)?;
+        if custody.public_key() != signer.hpke_public_key()? {
+            return Err(Error::Crypto);
+        }
+        let (envelope, read_key) = custody.seal(context, &packed).map_err(|_| Error::Crypto)?;
         let envelope = envelope.to_bytes().map_err(|_| Error::Crypto)?;
-        let wrapped_key = read_key.wrap(cipher, entropy).map_err(|_| Error::Crypto)?;
+        let wrapped_key = read_key
+            .wrap()
+            .map_err(|_| Error::Crypto)?
+            .as_bytes()
+            .to_vec();
         let transcript = Transcript {
             version: 1,
             community: self.state.profile.community.clone(),
@@ -325,6 +348,7 @@ impl Draft {
             community: self.state.profile.community.clone(),
             member: self.state.member.clone(),
             device: signer.public_key(),
+            hpke_key: Some(signer.hpke_public_key()?),
             credential: credential.to_vec(),
             profile,
             openings,
@@ -452,7 +476,7 @@ impl Candidate {
 pub fn open_full(
     publication: &Publication,
     verified: &VerifiedPublication,
-    key: &cnvl::ReadKey,
+    key: &cnvl::ReadKey<'_>,
     codec: &impl ProfileCodec,
     policy: &cgrd::PublishedPolicy<'_>,
     signed_schema: &[u8],
@@ -477,6 +501,7 @@ pub fn open_full(
     if body.community != verified.transcript().community
         || body.member != verified.transcript().member
         || body.device != verified.transcript().device
+        || body.hpke_key.as_ref() != verified.hpke_public_key()
         || cshm::PublicProfile::from(&profile) != *verified.public()
     {
         return Err(Error::Invalid);
