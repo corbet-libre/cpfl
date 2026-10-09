@@ -260,7 +260,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cgrd"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cgrd?branch=main#efbc07feea484d1a69ed5a46b27cfefe39c4c551"
+source = "git+https://github.com/corbet-foss/cgrd?branch=main#d3fa29482797fcd4a5679e811baf34ab0f3ac5d5"
 dependencies = [
  "bigdecimal",
  "cpns",
@@ -342,7 +342,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/ckmg?branch=main#08c47d7495b67dc28a795075d9d6ebb65667f663"
+source = "git+https://github.com/corbet-foss/ckmg?branch=main#86beae6226af7786b3dba7d2511181a4c0a276ae"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -368,7 +368,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 [[package]]
 name = "cnvl"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cnvl?branch=main#14dcabd259c8b16d6e719b2ee8d7e524d7dc2997"
+source = "git+https://github.com/corbet-foss/cnvl?branch=main#c5acfd485a0f50c6c0002c2ca9653c910ac280c8"
 dependencies = [
  "chacha20poly1305",
  "ckmg",
@@ -425,7 +425,7 @@ dependencies = [
 [[package]]
 name = "cpns"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cpns?branch=main#85674ab2e70f11051ba30ab44a8c7d3301ac6ec1"
+source = "git+https://github.com/corbet-foss/cpns?branch=main#eb041a636b4675570af9617d6b59978f50cd82fb"
 dependencies = [
  "getrandom 0.4.3",
  "sha2",
@@ -436,7 +436,7 @@ dependencies = [
 [[package]]
 name = "cprz"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cprz?branch=main#29408cbba494f2eb02a7f5b6157b793a82905688"
+source = "git+https://github.com/corbet-foss/cprz?branch=main#12bb1986310cecfbc9846cf0981f458b828507a4"
 dependencies = [
  "cprz-blob",
 ]
@@ -444,7 +444,7 @@ dependencies = [
 [[package]]
 name = "cprz-blob"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cprz?branch=main#29408cbba494f2eb02a7f5b6157b793a82905688"
+source = "git+https://github.com/corbet-foss/cprz?branch=main#12bb1986310cecfbc9846cf0981f458b828507a4"
 dependencies = [
  "brotli",
 ]
@@ -452,7 +452,7 @@ dependencies = [
 [[package]]
 name = "cprz-pad"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cprz?branch=main#29408cbba494f2eb02a7f5b6157b793a82905688"
+source = "git+https://github.com/corbet-foss/cprz?branch=main#12bb1986310cecfbc9846cf0981f458b828507a4"
 
 [[package]]
 name = "cpufeatures"
@@ -466,7 +466,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/crbk?branch=main#ee4f73334818e2053c7df3d123a8e3b8cc23b2cf"
+source = "git+https://github.com/corbet-foss/crbk?branch=main#5a458f97bf7310811cb71d1be86d84d26ec69500"
 dependencies = [
  "serde",
  "serde_json",
@@ -491,7 +491,7 @@ dependencies = [
 [[package]]
 name = "csgn"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/csgn?branch=main#eac891b771152b17aa3a903edfe9c129e43a371e"
+source = "git+https://github.com/corbet-foss/csgn?branch=main#f11c37e903d7f533fc546a2dc87b9f9310bee283"
 dependencies = [
  "ciborium-ll",
  "coset",
@@ -504,7 +504,7 @@ dependencies = [
 [[package]]
 name = "cshm"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cshm?branch=main#9fe8a3271ddecf0846d888d038645a55687c2111"
+source = "git+https://github.com/corbet-foss/cshm?branch=main#9c66f454d447483e8f7f93780a8e1948bbecfa89"
 dependencies = [
  "bigdecimal",
  "jsonschema",
@@ -552,7 +552,7 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cwst?branch=main#e9a49b74dae64c772fb11a518fc59e6ccee7a4a4"
+source = "git+https://github.com/corbet-foss/cwst?branch=main#b09ae3a7fb5c0b35f43781c845747ecd53db91f0"
 dependencies = [
  "atomicwrites",
  "blake3",
