@@ -15,10 +15,10 @@ test = false
 [dependencies]
 cprz = { git = "https://git.corbet.ch/corbet-foss/cprz.git", branch = "v01", default-features = false }
 cprz-pad = { git = "https://git.corbet.ch/corbet-foss/cprz.git", branch = "v01" }
-cgrd = { git = "https://git.corbet.ch/corbet-foss/cgrd.git", branch = "v01", default-features = false }
-cshm = { git = "https://git.corbet.ch/corbet-foss/cshm.git", branch = "v01" }
-csgn = { git = "https://git.corbet.ch/corbet-foss/csgn.git", branch = "v01", default-features = false }
-cpns = { git = "https://git.corbet.ch/corbet-foss/cpns.git", branch = "v01", default-features = false }
+cgrd = { git = "https://git.corbet.ch/corbet-foss/cgrd", branch = "main", default-features = false }
+cshm = { git = "https://git.corbet.ch/corbet-foss/cshm", branch = "main" }
+csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", default-features = false }
+cpns = { git = "https://git.corbet.ch/corbet-foss/cpns", branch = "main", default-features = false }
 ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01", features = ["profile-envelope"] }
 cnvl = { git = "https://git.corbet.ch/corbet-foss/cnvl.git", branch = "v01" }
 cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
@@ -29,7 +29,7 @@ serde_json = { version = "1", features = ["arbitrary_precision"] }
 zeroize = "1"
 
 [dev-dependencies]
-csgn = { git = "https://git.corbet.ch/corbet-foss/csgn.git", branch = "v01", default-features = false, features = ["volatile-signer"] }
+csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", default-features = false, features = ["volatile-signer"] }
 futures-executor = "0.3"
 wasm-bindgen-test = "0.3.79"
 

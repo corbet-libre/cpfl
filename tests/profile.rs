@@ -9,6 +9,8 @@ use csgn::{Kind, SecretKey, Signer};
 use ed25519_dalek::{Digest, Sha512, Signer as _, SigningKey};
 use serde_json::json;
 
+const ISSUANCE_ACTION: &str = "admission";
+
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 macro_rules! shared {
@@ -88,6 +90,8 @@ impl Auth {
         let mut issuer =
             Signer::new(community, SecretKey::from_seed(&mut [11; 32]), 1000, 10000).unwrap();
         let credential = cgrd::Credential {
+            purpose: cgrd::CredentialPurpose::CommunityCredentialV2,
+            issuance_action: ISSUANCE_ACTION.into(),
             community: community.into(),
             member: member.into(),
             handle: "mountain".into(),
@@ -136,6 +140,7 @@ impl Auth {
         cgrd::PublishedPolicy {
             policy: cgrd::Policy {
                 community: &self.community,
+                expected_issuance_action: ISSUANCE_ACTION,
                 keys: &self.keys,
                 now: 1100,
                 minimum_epoch: 2,
@@ -146,7 +151,6 @@ impl Auth {
             },
             revocations: &self.revocations,
             minimum_revocations_revision: 1,
-            action: "admission",
         }
     }
 }
