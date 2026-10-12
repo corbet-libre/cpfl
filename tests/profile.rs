@@ -875,7 +875,7 @@ async fn fixture_publication(
     let wrapped = key.wrap().unwrap();
     (auth, device, publication, wrapped, full)
 }
-fn resign(publication: &mut Publication, device: &mut Device) {
+fn resign_publication(publication: &mut Publication, device: &mut Device) {
     let mut transcript: Transcript = serde_json::from_slice(&publication.transcript).unwrap();
     transcript.public_digest = *blake3::hash(&publication.public_bundle).as_bytes();
     transcript.encrypted_digest = *blake3::hash(&publication.envelope).as_bytes();
@@ -897,7 +897,7 @@ fn reseal<'key>(
         .unwrap();
     let (envelope, key) = custody.seal(context, &packed).unwrap();
     publication.envelope = envelope.to_bytes().unwrap();
-    resign(publication, device);
+    resign_publication(publication, device);
     key
 }
 shared!(full_presentations_cannot_be_spliced_or_relabelled, {
@@ -1054,7 +1054,7 @@ shared!(full_presentations_cannot_be_spliced_or_relabelled, {
     ));
     substituted = Publication::from_bytes(&original).unwrap();
     substituted.public_bundle = serde_json::to_vec(&full).unwrap();
-    resign(&mut substituted, &mut device);
+    resign_publication(&mut substituted, &mut device);
     assert!(matches!(
         cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean),
         Err(Error::Invalid)
@@ -1235,7 +1235,7 @@ shared!(current_schema_rules_and_locked_storage_refuse, {
         member: String::new(),
     }];
     publication.transcript = serde_json::to_vec(&transcript).unwrap();
-    resign(&mut publication, &mut device);
+    resign_publication(&mut publication, &mut device);
     assert!(matches!(
         cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, 1, &clean),
         Err(Error::Schema)
@@ -1307,7 +1307,7 @@ shared!(
         no_detector.contact = &unavailable;
         assert!(cpfl::load_current_committed(&store, &binding, no_detector).is_err());
         store.ack_output(1, [32; 32], [31; 32]).await.unwrap();
-        store.lock();
+        store.lock_in_place();
         assert!(matches!(
             cpfl::load_current_committed(&store, &binding, auth.validation()),
             Err(Error::Storage)
