@@ -63,6 +63,9 @@ mkdir -p "$ARTIFACT_ROOT"
 export SOURCE_SHA256="$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)"
 export CCID_SOURCE_REVISION="$CI_COMMIT_SHA"
 "$CCID_BIN" render --repo "$PWD" --check
+if [ "$CHECKS" = "resolve-dependencies" ] || [ "$CHECKS" = "native" ]; then
+  exec "$CCID_BIN" check --repo "$PWD" --check "$CHECKS"
+fi
 proto --version
 moon --version
 rustc -vV
