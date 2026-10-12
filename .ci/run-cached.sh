@@ -6,8 +6,8 @@ exec 2>&1
 : "${CI_COMMIT_SHA:?Missing verified source revision}"
 : "${CI_REPOSITORY_URL:?Missing canonical repository identity}"
 : "${CHECKS:?Missing declared check selection}"
-if [ "$CHECKS" != "verify" ]; then
-  echo "CHECKS must be exactly 'verify', got: $CHECKS" >&2
+if [ "$CHECKS" != "verify" ] && [ "$CHECKS" != "resolve-dependencies" ] && [ "$CHECKS" != "native" ]; then
+  echo "CHECKS must be verify, resolve-dependencies or native, got: $CHECKS" >&2
   exit 2
 fi
 test -f Cargo.lock || { echo 'Cargo.lock must be present (committed snapshot)' >&2; exit 2; }
@@ -35,15 +35,13 @@ export PATH="$(dirname "$CCID_BIN"):$CARGO_HOME/bin:$PROTO_HOME/shims:$PROTO_HOM
 export CI_JOBS="${CI_JOBS:-2}" CARGO_BUILD_JOBS="${CI_JOBS:-2}"
 export RUST_TEST_THREADS="${CI_TEST_THREADS:-2}"
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
-if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
-  echo 'GIT_CONFIG_COUNT is already set; refusing to overwrite job git config' >&2
-  exit 2
-fi
-export GIT_CONFIG_COUNT=2
-export GIT_CONFIG_KEY_0='url.https://git.corbet.ch/corbet-libs/.insteadOf'
-export GIT_CONFIG_VALUE_0='https://github.com/corbet-libs/'
-export GIT_CONFIG_KEY_1='url.https://git.corbet.ch/corbet-foss/.insteadOf'
-export GIT_CONFIG_VALUE_1='https://github.com/corbet-foss/'
+# Append to any git config the verified runtime already supplies through the environment.
+git_config_base=${GIT_CONFIG_COUNT:-0}
+export GIT_CONFIG_COUNT=$((git_config_base + 2))
+export "GIT_CONFIG_KEY_$((git_config_base + 0))=url.https://git.corbet.ch/corbet-libs/.insteadOf"
+export "GIT_CONFIG_VALUE_$((git_config_base + 0))=https://github.com/corbet-libs/"
+export "GIT_CONFIG_KEY_$((git_config_base + 1))=url.https://git.corbet.ch/corbet-foss/.insteadOf"
+export "GIT_CONFIG_VALUE_$((git_config_base + 1))=https://github.com/corbet-foss/"
 # Shared-first toolchain lock: production base helper verbatim (no MSRV extra;
 # hosted uses stable only; nightly coverage rides the same gate->main flow).
 TOOLCHAIN_LOCK_FILE="$toolchains/install.lock"
