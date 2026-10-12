@@ -388,8 +388,18 @@ impl Candidate {
         store: &mut cwst::Store<B>,
         current: Validation<'_>,
         operation: [u8; 32],
-        mut dependent_changes: Vec<cwst::Change<'_>>,
+        dependent_changes: Vec<cwst::Change<'_>>,
     ) -> Result<u64, Error> {
+        self.authorize(current)?
+            .commit(store, operation, dependent_changes)
+            .await
+    }
+
+    /// Check the prepared publication against the CURRENT policy, schema and
+    /// contact detector, synchronously. A runtime that can only borrow the current
+    /// trust state inside a synchronous callback calls this there and then awaits
+    /// `Authorized::commit` outside it; the Store version fence still applies.
+    pub fn authorize(self, current: Validation<'_>) -> Result<Authorized, Error> {
         if current.policy.policy.now < self.prepared_at {
             return Err(Error::Admission);
         }
@@ -413,7 +423,23 @@ impl Candidate {
         {
             return Err(Error::Admission);
         }
-        if !store.is_scope(&self.scope) {
+        Ok(Authorized(self))
+    }
+}
+
+/// A candidate that passed the current-policy checks of `Candidate::authorize`.
+/// It owns no policy borrow and only `commit` can persist it.
+pub struct Authorized(Candidate);
+impl Authorized {
+    /// Persist atomically with any dependent owner changes (see `commit_publication`).
+    pub async fn commit<B: cwst::backend::Backend>(
+        self,
+        store: &mut cwst::Store<B>,
+        operation: [u8; 32],
+        mut dependent_changes: Vec<cwst::Change<'_>>,
+    ) -> Result<u64, Error> {
+        let this = self.0;
+        if !store.is_scope(&this.scope) {
             return Err(Error::Invalid);
         }
         if let Some(bytes) = store
@@ -422,7 +448,7 @@ impl Candidate {
         {
             let previous = Publication::from_bytes(bytes)?;
             let previous: Transcript = decode(&previous.transcript)?;
-            if self.revision <= previous.revision {
+            if this.revision <= previous.revision {
                 return Err(Error::Invalid);
             }
         }
@@ -444,25 +470,25 @@ impl Candidate {
         dependent_changes.push(cwst::Change::Put {
             owner: "profile",
             key: b"draft",
-            value: &self.checkpoint,
+            value: &this.checkpoint,
         });
         dependent_changes.push(cwst::Change::Put {
             owner: "profile.keys",
-            key: &self.read_key_id,
-            value: &self.wrapped_key,
+            key: &this.read_key_id,
+            value: &this.wrapped_key,
         });
         dependent_changes.push(cwst::Change::Put {
             owner: "profile",
             key: b"publication",
-            value: &self.publication,
+            value: &this.publication,
         });
         let output = cwst::Output {
             id: operation,
-            bytes: self.publication.clone(),
+            bytes: this.publication.clone(),
         };
         store
             .commit(
-                self.expected_checkpoint,
+                this.expected_checkpoint,
                 operation,
                 &dependent_changes,
                 &[output],
@@ -471,6 +497,7 @@ impl Candidate {
             .map_err(|_| Error::Storage)
     }
 }
+
 /// Open only a currently admitted owner's exact signed full projection. Decrypted
 /// bytes still need Guard; encryption alone never grants schema/pin/device authority.
 pub fn open_full(

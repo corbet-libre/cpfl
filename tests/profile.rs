@@ -1087,6 +1087,48 @@ shared!(delayed_commit_rechecks_current_admission_and_clock, {
     }
 });
 
+shared!(
+    authorization_is_synchronous_and_the_write_is_fenced_afterwards,
+    {
+        let mut draft = Draft::new("alice".into(), profile()).unwrap();
+        let mut device = device();
+        let auth = Auth::new(&mut draft, &device);
+        let cipher = cipher();
+        let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+            .await
+            .unwrap();
+        // Stale policy is refused at the synchronous step, before any store access.
+        let mut stale = auth.validation();
+        stale.policy.policy.now = 1099;
+        assert_eq!(
+            prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+                .await
+                .unwrap()
+                .authorize(stale)
+                .err(),
+            Some(Error::Admission)
+        );
+        // The authorized candidate holds no policy borrow and commits in a later await.
+        let authorized = prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+            .await
+            .unwrap()
+            .authorize(auth.validation())
+            .unwrap();
+        assert!(authorized.commit(&mut store, [1; 32], vec![]).await.is_ok());
+        assert_eq!(store.load_pending().unwrap().len(), 1);
+        // The store version fence still rejects a candidate prepared on an old version.
+        let old = prepare(&draft, &auth, &mut device, &cipher, 0, 2)
+            .await
+            .unwrap()
+            .authorize(auth.validation())
+            .unwrap();
+        assert_eq!(
+            old.commit(&mut store, [2; 32], vec![]).await,
+            Err(Error::Storage)
+        );
+    }
+);
+
 shared!(current_contact_check_covers_the_private_projection, {
     let mut draft = Draft::new("alice".into(), profile()).unwrap();
     let mut device = device();
