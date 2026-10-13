@@ -182,6 +182,9 @@ impl EnvelopeKeys {
         .unwrap()
     }
 }
+fn no_sponsors(_: &str) -> Option<Vec<[u8; 32]>> {
+    None
+}
 async fn prepare(
     draft: &Draft,
     auth: &Auth,
@@ -203,6 +206,7 @@ async fn prepare(
         &keys.custody(),
         &PortableCodec,
         &clean,
+        &no_sponsors,
     )
 }
 // Re-sign the actual authenticated fixture payload; never replace verification.
@@ -772,7 +776,8 @@ shared!(draft_and_publication_resource_refusals, {
                 &mut device,
                 &EnvelopeKeys::new(&Device(SigningKey::from_bytes(&[22; 32])), &auth).custody(),
                 &PortableCodec,
-                &clean
+                &clean,
+                &no_sponsors,
             ),
             Err(Error::Invalid)
         ));
@@ -1179,6 +1184,7 @@ shared!(unrelated_envelope_custody_never_releases_a_candidate, {
             &wrong.custody(),
             &PortableCodec,
             &clean,
+            &no_sponsors,
         ),
         Err(Error::Crypto)
     ));
@@ -1202,6 +1208,7 @@ shared!(current_schema_rules_and_locked_storage_refuse, {
             &EnvelopeKeys::new(&Device(SigningKey::from_bytes(&[22; 32])), &auth).custody(),
             &PortableCodec,
             &clean,
+            &no_sponsors,
         ),
         Err(Error::Admission)
     ));
@@ -1494,5 +1501,94 @@ shared!(
                 .receive(&transfer, &context, &sender, &recipient, &binding)
                 .is_ok()
         );
+    }
+);
+
+async fn published_public(
+    draft: &Draft,
+    auth: &Auth,
+    device: &mut Device,
+    revision: u64,
+    sponsors: cgrd::Sponsors<'_>,
+) -> Result<cgrd::Bundle, Error> {
+    let cipher = cipher();
+    let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+        .await
+        .unwrap();
+    let keys = EnvelopeKeys::new(device, auth);
+    let candidate = draft.prepare_publication(
+        &auth.credential,
+        &auth.policy(),
+        &auth.schema,
+        revision,
+        1,
+        vec![1, 2],
+        0,
+        device,
+        &keys.custody(),
+        &PortableCodec,
+        &clean,
+        sponsors,
+    )?;
+    candidate
+        .commit_publication(&mut store, auth.validation(), [1; 32], vec![])
+        .await
+        .unwrap();
+    let wire = store.load_pending().unwrap()[0].bytes.clone();
+    let publication = Publication::from_bytes(&wire).unwrap();
+    cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, revision, &clean).unwrap();
+    Ok(serde_json::from_slice(&publication.public_bundle).unwrap())
+}
+
+fn endorsement(key: &SigningKey, handle: &str) -> Vec<u8> {
+    use ed25519_dalek::Signer as _;
+    let signature = key.sign(&cvch::link::endorsement_bytes("garden", "alice", handle));
+    cvch::link::Endorsement::new(handle, key.verifying_key().to_bytes(), signature.to_bytes())
+        .unwrap()
+        .to_bytes()
+        .unwrap()
+}
+
+shared!(
+    the_system_endorsement_is_verified_at_publication_and_one_way,
+    {
+        let mut draft = Draft::new("alice".into(), profile()).unwrap();
+        let mut device = device();
+        let auth = Auth::new(&mut draft, &device);
+        assert!(draft.set_vouched_by(Some(vec![])).is_err());
+        assert!(
+            draft
+                .set_vouched_by(Some(vec![1; cgrd::MAX_ENDORSEMENT_BYTES + 1]))
+                .is_err()
+        );
+        let sponsor = SigningKey::from_bytes(&[8; 32]);
+        let key = sponsor.verifying_key().to_bytes();
+        let present = |h: &str| (h == "sponsorname").then(|| vec![key]);
+        let wire = endorsement(&sponsor, "sponsorname");
+        draft.set_vouched_by(Some(wire.clone())).unwrap();
+        let public = published_public(&draft, &auth, &mut device, 1, &present)
+            .await
+            .unwrap();
+        assert_eq!(cgrd::vouched_by(&public), Some(wire));
+        assert!(cgrd::vouched_verified(&public));
+        // Forgery: a self-signed endorsement naming an absent handle is refused.
+        let stranger = SigningKey::from_bytes(&[9; 32]);
+        draft
+            .set_vouched_by(Some(endorsement(&stranger, "gonehandle")))
+            .unwrap();
+        assert!(matches!(
+            published_public(&draft, &auth, &mut device, 1, &present).await,
+            Err(Error::Admission)
+        ));
+        // Editing the answers never touches the system field.
+        draft.edit(profile()).unwrap();
+        assert!(draft.vouched_by().is_some());
+        // Hidden mode: clearing removes it from the next publication.
+        draft.set_vouched_by(None).unwrap();
+        let public = published_public(&draft, &auth, &mut device, 1, &no_sponsors)
+            .await
+            .unwrap();
+        assert_eq!(cgrd::vouched_by(&public), None);
+        assert!(!cgrd::vouched_verified(&public));
     }
 );
