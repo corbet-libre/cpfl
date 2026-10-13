@@ -6,8 +6,8 @@ exec 2>&1
 : "${CI_COMMIT_SHA:?Missing verified source revision}"
 : "${CI_REPOSITORY_URL:?Missing canonical repository identity}"
 : "${CHECKS:?Missing declared check selection}"
-if [ "$CHECKS" != "verify" ]; then
-  echo "CHECKS must be exactly 'verify', got: $CHECKS" >&2
+if [ "$CHECKS" != "verify" ] && [ "$CHECKS" != "resolve-dependencies" ] && [ "$CHECKS" != "native" ]; then
+  echo "CHECKS must be verify, resolve-dependencies or native, got: $CHECKS" >&2
   exit 2
 fi
 test -f Cargo.lock || { echo 'Cargo.lock must be present (committed snapshot)' >&2; exit 2; }
@@ -84,6 +84,9 @@ mkdir -p "$ARTIFACT_ROOT"
 export SOURCE_SHA256="$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)"
 export CCID_SOURCE_REVISION="$CI_COMMIT_SHA"
 "$CCID_BIN" render --repo "$PWD" --check
+if [ "$CHECKS" = "resolve-dependencies" ] || [ "$CHECKS" = "native" ]; then
+  exec "$CCID_BIN" check --repo "$PWD" --check "$CHECKS"
+fi
 proto --version
 moon --version
 rustc -vV

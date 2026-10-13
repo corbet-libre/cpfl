@@ -1,7 +1,7 @@
 use crate::{
     Error, Publication, Transcript, VerifiedPublication, decode, encode, publication_binding,
 };
-use ckmg::{Entropy, passkey::StoreCipher};
+use ckmg::Entropy;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -10,8 +10,27 @@ use zeroize::{Zeroize, Zeroizing};
 pub trait DeviceSigner {
     /// Community-local public key; Guard checks its credential authorization.
     fn public_key(&self) -> [u8; 32];
+    /// Actual X25519 public key of the same opaque device custody. Both profile
+    /// projections include this field inside their original device signature.
+    fn hpke_public_key(&self) -> Result<[u8; 32], Error>;
     /// Sign exact domain-framed bytes with the authorized device capability.
     fn sign(&mut self, bytes: &[u8]) -> Result<[u8; 64], Error>;
+}
+
+// This adapter deliberately accepts only the lineage-device capability. Derived
+// purpose signers cannot stand in for the credential-authorized Profile device.
+impl DeviceSigner for ckmg::DeviceEd25519Signer<'_> {
+    fn public_key(&self) -> [u8; 32] {
+        *self.public_key()
+    }
+
+    fn hpke_public_key(&self) -> Result<[u8; 32], Error> {
+        ckmg::DeviceEd25519Signer::hpke_public_key(self).map_err(|_| Error::Crypto)
+    }
+
+    fn sign(&mut self, bytes: &[u8]) -> Result<[u8; 64], Error> {
+        ckmg::DeviceEd25519Signer::sign(self, bytes).map_err(|_| Error::Crypto)
+    }
 }
 /// Compression port for cprz's maintained bounded codec and Padme implementation.
 /// The production implementation is PortableCodec, using maintained Brotli and Padme.
@@ -224,9 +243,8 @@ impl Draft {
         reachability: Vec<u8>,
         expected_checkpoint: u64,
         signer: &mut impl DeviceSigner,
-        cipher: &StoreCipher,
+        custody: &cnvl::Custodian<'_>,
         codec: &impl ProfileCodec,
-        entropy: &mut impl Entropy,
         contact: &impl Fn(&str) -> cshm::ContactCheck,
     ) -> Result<Candidate, Error> {
         if revision == 0
@@ -274,11 +292,16 @@ impl Draft {
             schema_revision: u64::from(self.state.profile.schema_version),
             key_generation,
         };
-        let key = cnvl::SealKey::generate(entropy).map_err(|_| Error::Crypto)?;
-        let (envelope, read_key) =
-            cnvl::seal(key, context, &packed, entropy).map_err(|_| Error::Crypto)?;
+        if custody.public_key() != signer.hpke_public_key()? {
+            return Err(Error::Crypto);
+        }
+        let (envelope, read_key) = custody.seal(context, &packed).map_err(|_| Error::Crypto)?;
         let envelope = envelope.to_bytes().map_err(|_| Error::Crypto)?;
-        let wrapped_key = read_key.wrap(cipher, entropy).map_err(|_| Error::Crypto)?;
+        let wrapped_key = read_key
+            .wrap()
+            .map_err(|_| Error::Crypto)?
+            .as_bytes()
+            .to_vec();
         let transcript = Transcript {
             version: 1,
             community: self.state.profile.community.clone(),
@@ -325,6 +348,7 @@ impl Draft {
             community: self.state.profile.community.clone(),
             member: self.state.member.clone(),
             device: signer.public_key(),
+            hpke_key: Some(signer.hpke_public_key()?),
             credential: credential.to_vec(),
             profile,
             openings,
@@ -364,8 +388,18 @@ impl Candidate {
         store: &mut cwst::Store<B>,
         current: Validation<'_>,
         operation: [u8; 32],
-        mut dependent_changes: Vec<cwst::Change<'_>>,
+        dependent_changes: Vec<cwst::Change<'_>>,
     ) -> Result<u64, Error> {
+        self.authorize(current)?
+            .commit(store, operation, dependent_changes)
+            .await
+    }
+
+    /// Check the prepared publication against the CURRENT policy, schema and
+    /// contact detector, synchronously. A runtime that can only borrow the current
+    /// trust state inside a synchronous callback calls this there and then awaits
+    /// `Authorized::commit` outside it; the Store version fence still applies.
+    pub fn authorize(self, current: Validation<'_>) -> Result<Authorized, Error> {
         if current.policy.policy.now < self.prepared_at {
             return Err(Error::Admission);
         }
@@ -389,7 +423,23 @@ impl Candidate {
         {
             return Err(Error::Admission);
         }
-        if !store.is_scope(&self.scope) {
+        Ok(Authorized(self))
+    }
+}
+
+/// A candidate that passed the current-policy checks of `Candidate::authorize`.
+/// It owns no policy borrow and only `commit` can persist it.
+pub struct Authorized(Candidate);
+impl Authorized {
+    /// Persist atomically with any dependent owner changes (see `commit_publication`).
+    pub async fn commit<B: cwst::backend::Backend>(
+        self,
+        store: &mut cwst::Store<B>,
+        operation: [u8; 32],
+        mut dependent_changes: Vec<cwst::Change<'_>>,
+    ) -> Result<u64, Error> {
+        let this = self.0;
+        if !store.is_scope(&this.scope) {
             return Err(Error::Invalid);
         }
         if let Some(bytes) = store
@@ -398,7 +448,7 @@ impl Candidate {
         {
             let previous = Publication::from_bytes(bytes)?;
             let previous: Transcript = decode(&previous.transcript)?;
-            if self.revision <= previous.revision {
+            if this.revision <= previous.revision {
                 return Err(Error::Invalid);
             }
         }
@@ -420,25 +470,25 @@ impl Candidate {
         dependent_changes.push(cwst::Change::Put {
             owner: "profile",
             key: b"draft",
-            value: &self.checkpoint,
+            value: &this.checkpoint,
         });
         dependent_changes.push(cwst::Change::Put {
             owner: "profile.keys",
-            key: &self.read_key_id,
-            value: &self.wrapped_key,
+            key: &this.read_key_id,
+            value: &this.wrapped_key,
         });
         dependent_changes.push(cwst::Change::Put {
             owner: "profile",
             key: b"publication",
-            value: &self.publication,
+            value: &this.publication,
         });
         let output = cwst::Output {
             id: operation,
-            bytes: self.publication.clone(),
+            bytes: this.publication.clone(),
         };
         store
             .commit(
-                self.expected_checkpoint,
+                this.expected_checkpoint,
                 operation,
                 &dependent_changes,
                 &[output],
@@ -447,12 +497,13 @@ impl Candidate {
             .map_err(|_| Error::Storage)
     }
 }
+
 /// Open only a currently admitted owner's exact signed full projection. Decrypted
 /// bytes still need Guard; encryption alone never grants schema/pin/device authority.
 pub fn open_full(
     publication: &Publication,
     verified: &VerifiedPublication,
-    key: &cnvl::ReadKey,
+    key: &cnvl::ReadKey<'_>,
     codec: &impl ProfileCodec,
     policy: &cgrd::PublishedPolicy<'_>,
     signed_schema: &[u8],
@@ -477,6 +528,7 @@ pub fn open_full(
     if body.community != verified.transcript().community
         || body.member != verified.transcript().member
         || body.device != verified.transcript().device
+        || body.hpke_key.as_ref() != verified.hpke_public_key()
         || cshm::PublicProfile::from(&profile) != *verified.public()
     {
         return Err(Error::Invalid);

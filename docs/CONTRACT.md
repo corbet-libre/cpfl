@@ -50,5 +50,30 @@ complete outer publication, before parsing. Reachability is at most 4096 bytes.
 Limits can refuse inputs that are structurally valid under a larger schema.
 Errors and Debug omit values, pseudonyms, keys and salts. No network or issuer
 policy is implemented here. DeviceSigner and ProfileCodec are integration ports;
-the production G3 signer remains dependent on the identity owner. Compression
+the production projection implements DeviceSigner only for Keys' borrowed
+DeviceEd25519Signer. The composing Vault obtains it through
+Keys::with_device_ed25519_signer after current authority checks and prepares the
+publication inside that synchronous callback. A derived purpose signer has no
+such implementation. This projection does not create server G3 authority or
+replace the fresh Guard checks at publication commit. Compression
 uses the real maintained portable implementation and is tested on both targets.
+
+VerifiedPublication::authority_until is an exclusive Unix-second retention bound derived inside successful verification from the original signed credential, settings, schema and revocation envelopes and all three maximum-snapshot-age deadlines. Guard admits age equality, so expiry is issued + maximum age + 1 (saturating). Guard already requires every included gate lifetime to cover the credential, including optional gates; Profile preserves that policy. An earlier policy or revocation update requires revalidation before this upper bound. The getter is not live device possession or current remote policy proof.
+
+
+`load_committed(actual_store, current_binding, current_validation, revision_floor)`
+reads the one original Profile publication record, checks the exact Store scope,
+and reruns original Guard/signature/schema/contact verification before returning
+`Option<CommittedPublication>`. The caller supplies current owner binding/policy
+and a trusted revision floor, never publication bytes or private record keys.
+The result borrows the exact committed serialized bytes and exposes its parsed
+Publication, VerifiedPublication (member/revision/expiry) and actual checkpoint
+version. Its lifetime retains an immutable Store borrow: mutation and lock cannot
+silently replace the publication while borrowed. Missing means local absence
+only; locked/unavailable storage, malformed or foreign-member bytes, stale
+revision and expired/revoked policy refuse. After releasing Store or awaiting
+external authority, consumers reload/revalidate before disclosure or sending.
+This capability is not live passkey G3, a Board session or current remote policy.
+
+The Keys signer projection requires the distinct LendDeviceSigner action;
+metadata Use and exact Board signing admission cannot authorize that lender.

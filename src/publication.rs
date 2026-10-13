@@ -82,6 +82,104 @@ impl Publication {
         })
     }
 }
+/// The exact current Profile record borrowed from an unlocked original Store.
+/// Its lifetime prevents a local mutation/lock while borrowed; consumers must
+/// reload and revalidate after releasing the Store or awaiting external authority.
+/// This proves local committed provenance, not live device G3 or remote freshness.
+pub struct CommittedPublication<'store> {
+    bytes: &'store [u8],
+    publication: Publication,
+    verified: VerifiedPublication,
+    checkpoint: u64,
+}
+impl CommittedPublication<'_> {
+    /// Original committed serialization, not a newly reconstructed transcript.
+    pub fn bytes(&self) -> &[u8] {
+        self.bytes
+    }
+    /// Parsed original publication for its owner's transport API.
+    pub fn publication(&self) -> &Publication {
+        &self.publication
+    }
+    /// Original Guard verification, including member/revision and authority bound.
+    pub fn verified(&self) -> &VerifiedPublication {
+        &self.verified
+    }
+    /// Actual Store version while this value is borrowed.
+    pub fn checkpoint(&self) -> u64 {
+        self.checkpoint
+    }
+}
+
+/// Load only Profile's canonical committed publication from the actual Vault
+/// Store. The binding and revision floor must come from current trusted owners;
+/// no publication bytes or storage namespace can be supplied by the caller.
+/// Missing means only that this unlocked local checkpoint has no publication.
+pub fn load_committed<'store, B: cwst::backend::Backend>(
+    store: &'store cwst::Store<B>,
+    binding: &ckmg::Binding,
+    current: crate::Validation<'_>,
+    minimum_revision: u64,
+) -> Result<Option<CommittedPublication<'store>>, Error> {
+    load_from_store(store, binding, current, Some(minimum_revision))
+}
+
+/// Load this member's current local publication using Profile's own committed
+/// revision floor. `Candidate::commit_publication` advances this record strictly
+/// in the same Store CAS as its publication and encrypted profile key.
+///
+/// Callers cannot supply a floor, publication, or namespace. The actual Store
+/// checkpoint must already have passed Vault/Keys freshness checks. This is a
+/// local Profile floor, never proof of a remote record frontier or G2 currentness.
+pub fn load_current_committed<'store, B: cwst::backend::Backend>(
+    store: &'store cwst::Store<B>,
+    binding: &ckmg::Binding,
+    current: crate::Validation<'_>,
+) -> Result<Option<CommittedPublication<'store>>, Error> {
+    load_from_store(store, binding, current, None)
+}
+
+fn load_from_store<'store, B: cwst::backend::Backend>(
+    store: &'store cwst::Store<B>,
+    binding: &ckmg::Binding,
+    current: crate::Validation<'_>,
+    minimum_revision: Option<u64>,
+) -> Result<Option<CommittedPublication<'store>>, Error> {
+    let checkpoint = store.version().map_err(|_| Error::Storage)?;
+    if !store.is_scope(binding.community()) {
+        return Err(Error::Invalid);
+    }
+    let Some(bytes) = store
+        .read("profile", b"publication")
+        .map_err(|_| Error::Storage)?
+    else {
+        return Ok(None);
+    };
+    let publication = Publication::from_bytes(bytes)?;
+    let minimum_revision = match minimum_revision {
+        Some(floor) => floor,
+        None => decode::<Transcript>(&publication.transcript)?.revision,
+    };
+    let contact = |text: &str| (current.contact)(text);
+    let verified = verify_publication(
+        &publication,
+        &current.policy,
+        current.signed_schema,
+        minimum_revision,
+        &contact,
+    )?;
+    let transcript = verified.transcript();
+    if transcript.community != binding.community() || transcript.member != binding.member() {
+        return Err(Error::Invalid);
+    }
+    Ok(Some(CommittedPublication {
+        bytes,
+        publication,
+        verified,
+        checkpoint,
+    }))
+}
+
 /// Exact signature framing; Ed25519 performs signing and verification.
 pub fn publication_binding(transcript: &[u8]) -> Vec<u8> {
     [b"cpfl:publication:v1\0".as_slice(), transcript].concat()
@@ -92,8 +190,19 @@ pub struct VerifiedPublication {
     transcript: Transcript,
     public: cshm::PublicProfile,
     participant: cgrd::Participant,
+    authority_until: u64,
+    hpke_key: Option<[u8; 32]>,
 }
 impl VerifiedPublication {
+    /// Explicit signed recipient metadata, absent only on a legacy publication.
+    pub fn hpke_public_key(&self) -> Option<&[u8; 32]> {
+        self.hpke_key.as_ref()
+    }
+    /// Exclusive Unix-second bound on this verification's retained authority.
+    /// Earlier policy/revocation updates still require immediate revalidation.
+    pub fn authority_until(&self) -> u64 {
+        self.authority_until
+    }
     /// Authenticated owner transcript.
     pub fn transcript(&self) -> &Transcript {
         &self.transcript
@@ -144,6 +253,7 @@ pub fn verify_publication(
         return Err(Error::Admission);
     }
     let body: cgrd::BundleContent = decode(&bundle.payload)?;
+    let authority_until = authority_deadline(policy, signed_schema, &body.credential)?;
     let cgrd::Profile::Public(public) = body.profile else {
         return Err(Error::Invalid);
     };
@@ -169,12 +279,50 @@ pub fn verify_publication(
         transcript,
         public,
         participant,
+        authority_until,
+        hpke_key: body.hpke_key,
     };
     let envelope = cnvl::Envelope::from_bytes(&publication.envelope).map_err(|_| Error::Invalid)?;
     if !envelope.matches_context(&verified.context()) {
         return Err(Error::Invalid);
     }
     Ok(verified)
+}
+
+// Called only after Guard admitted the exact bundle. Bound retention to every
+// authenticated envelope, without duplicating Guard's action policy. Guard also
+// refuses any included gate expiring before the credential (including optional
+// gates), so the credential expiry already bounds all included gate transitions.
+fn authority_deadline(
+    policy: &cgrd::PublishedPolicy<'_>,
+    schema: &[u8],
+    credential: &[u8],
+) -> Result<u64, Error> {
+    let now = policy.policy.now;
+    let verified = policy
+        .policy
+        .keys
+        .verify(credential, csgn::Kind::Credential, now)
+        .map_err(|_| Error::Admission)?;
+    let mut until = verified.valid_until();
+    for (bytes, kind) in [
+        (policy.policy.settings, csgn::Kind::SettingsSnapshot),
+        (schema, csgn::Kind::SchemaSnapshot),
+        (policy.revocations, csgn::Kind::RevocationListSnapshot),
+    ] {
+        let signed = policy
+            .policy
+            .keys
+            .verify(bytes, kind, now)
+            .map_err(|_| Error::Admission)?;
+        // Guard admits equality at maximum age; this bound is exclusive.
+        let age_until = signed
+            .issued_at()
+            .saturating_add(policy.policy.maximum_snapshot_age)
+            .saturating_add(1);
+        until = until.min(signed.valid_until()).min(age_until);
+    }
+    Ok(until)
 }
 pub(crate) fn authenticated_schema(
     policy: &cgrd::PublishedPolicy<'_>,

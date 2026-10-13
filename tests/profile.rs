@@ -6,8 +6,10 @@ use ckmg::{
 };
 use cpfl::{DeviceSigner, Draft, Error, PortableCodec, ProfileCodec, Publication, Transcript};
 use csgn::{Kind, SecretKey, Signer};
-use ed25519_dalek::{Signer as _, SigningKey};
+use ed25519_dalek::{Digest, Sha512, Signer as _, SigningKey};
 use serde_json::json;
+
+const ISSUANCE_ACTION: &str = "admission";
 
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -25,6 +27,9 @@ struct Device(SigningKey);
 impl DeviceSigner for Device {
     fn public_key(&self) -> [u8; 32] {
         self.0.verifying_key().to_bytes()
+    }
+    fn hpke_public_key(&self) -> Result<[u8; 32], Error> {
+        Ok(self.0.verifying_key().to_montgomery().to_bytes())
     }
     fn sign(&mut self, bytes: &[u8]) -> Result<[u8; 64], Error> {
         Ok(self.0.sign(bytes).to_bytes())
@@ -65,6 +70,7 @@ fn clean(_: &str) -> cshm::ContactCheck {
 }
 struct Auth {
     community: String,
+    member: String,
     keys: csgn::KeyRing,
     settings: Vec<u8>,
     schema: Vec<u8>,
@@ -84,6 +90,8 @@ impl Auth {
         let mut issuer =
             Signer::new(community, SecretKey::from_seed(&mut [11; 32]), 1000, 10000).unwrap();
         let credential = cgrd::Credential {
+            purpose: cgrd::CredentialPurpose::CommunityCredentialV2,
+            issuance_action: ISSUANCE_ACTION.into(),
             community: community.into(),
             member: member.into(),
             handle: "mountain".into(),
@@ -113,6 +121,7 @@ impl Auth {
         );
         Self {
             community: community.into(),
+            member: member.into(),
             keys: issuer.key_ring().clone(),
             settings,
             schema,
@@ -131,6 +140,7 @@ impl Auth {
         cgrd::PublishedPolicy {
             policy: cgrd::Policy {
                 community: &self.community,
+                expected_issuance_action: ISSUANCE_ACTION,
                 keys: &self.keys,
                 now: 1100,
                 minimum_epoch: 2,
@@ -141,18 +151,46 @@ impl Auth {
             },
             revocations: &self.revocations,
             minimum_revocations_revision: 1,
-            action: "admission",
         }
+    }
+}
+// Test-only original device material; production uses Keys::with_profile_custody.
+struct EnvelopeKeys {
+    hpke: [u8; 32],
+    community: String,
+    member: String,
+    device: [u8; 32],
+}
+impl EnvelopeKeys {
+    fn new(device: &Device, auth: &Auth) -> Self {
+        let expanded = Sha512::digest(device.0.as_bytes());
+        Self {
+            hpke: expanded[..32].try_into().unwrap(),
+            community: auth.community.clone(),
+            member: auth.member.clone(),
+            device: device.public_key(),
+        }
+    }
+    fn custody(&self) -> cnvl::Custodian<'_> {
+        cnvl::Custodian::from_keys(
+            &self.hpke,
+            &[44; 32],
+            &self.community,
+            &self.member,
+            self.device,
+        )
+        .unwrap()
     }
 }
 async fn prepare(
     draft: &Draft,
     auth: &Auth,
     device: &mut Device,
-    cipher: &StoreCipher,
+    _cipher: &StoreCipher,
     version: u64,
     revision: u64,
 ) -> Result<cpfl::Candidate, Error> {
+    let keys = EnvelopeKeys::new(device, auth);
     draft.prepare_publication(
         &auth.credential,
         &auth.policy(),
@@ -162,12 +200,187 @@ async fn prepare(
         vec![1, 2],
         version,
         device,
-        cipher,
+        &keys.custody(),
         &PortableCodec,
-        &mut SystemEntropy,
         &clean,
     )
 }
+// Re-sign the actual authenticated fixture payload; never replace verification.
+fn resign(
+    auth: &Auth,
+    bytes: &[u8],
+    kind: Kind,
+    issued: u64,
+    until: u64,
+    gate: Option<u64>,
+) -> Vec<u8> {
+    let envelope = auth.keys.verify(bytes, kind, 1100).unwrap();
+    let mut body: serde_json::Value = serde_json::from_slice(envelope.payload()).unwrap();
+    if let Some(expiry) = gate {
+        body["gates"] = json!([{"gate":"optional","provider":"test","valid_until":expiry}]);
+    }
+    Signer::new(
+        &auth.community,
+        SecretKey::from_seed(&mut [11; 32]),
+        1000,
+        10000,
+    )
+    .unwrap()
+    .sign(kind, &serde_json::to_vec(&body).unwrap(), issued, until)
+    .unwrap()
+}
+shared!(verified_authority_ends_at_authenticated_deadlines, {
+    // Credential, settings, schema, revocations and each snapshot age can
+    // independently be the earliest deadline. Equality at maximum age is valid.
+    for case in 0..9 {
+        let mut draft = Draft::new("alice".into(), profile()).unwrap();
+        let mut device = device();
+        let mut auth = Auth::new(&mut draft, &device);
+        let expected = match case {
+            0 => {
+                auth.credential =
+                    resign(&auth, &auth.credential, Kind::Credential, 1000, 1200, None);
+                1200
+            }
+            1 => {
+                auth.settings = resign(
+                    &auth,
+                    &auth.settings,
+                    Kind::SettingsSnapshot,
+                    1000,
+                    1201,
+                    None,
+                );
+                1201
+            }
+            2 => {
+                auth.schema = resign(&auth, &auth.schema, Kind::SchemaSnapshot, 1000, 1202, None);
+                1202
+            }
+            3 => {
+                auth.revocations = resign(
+                    &auth,
+                    &auth.revocations,
+                    Kind::RevocationListSnapshot,
+                    1000,
+                    1203,
+                    None,
+                );
+                1203
+            }
+            4 => {
+                auth.credential = resign(
+                    &auth,
+                    &auth.credential,
+                    Kind::Credential,
+                    1000,
+                    1199,
+                    Some(1199),
+                );
+                1199
+            }
+            5 => 1301,
+            6 => {
+                auth.settings = resign(
+                    &auth,
+                    &auth.settings,
+                    Kind::SettingsSnapshot,
+                    1000,
+                    2000,
+                    None,
+                );
+                auth.schema = resign(&auth, &auth.schema, Kind::SchemaSnapshot, 1001, 2000, None);
+                auth.revocations = resign(
+                    &auth,
+                    &auth.revocations,
+                    Kind::RevocationListSnapshot,
+                    1001,
+                    2000,
+                    None,
+                );
+                1301
+            }
+            7 => {
+                auth.settings = resign(
+                    &auth,
+                    &auth.settings,
+                    Kind::SettingsSnapshot,
+                    1001,
+                    2000,
+                    None,
+                );
+                auth.revocations = resign(
+                    &auth,
+                    &auth.revocations,
+                    Kind::RevocationListSnapshot,
+                    1001,
+                    2000,
+                    None,
+                );
+                1301
+            }
+            _ => {
+                auth.settings = resign(
+                    &auth,
+                    &auth.settings,
+                    Kind::SettingsSnapshot,
+                    1001,
+                    2000,
+                    None,
+                );
+                auth.schema = resign(&auth, &auth.schema, Kind::SchemaSnapshot, 1001, 2000, None);
+                1301
+            }
+        };
+        let cipher = cipher();
+        let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+            .await
+            .unwrap();
+        prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+            .await
+            .unwrap()
+            .commit_publication(&mut store, auth.validation(), [1; 32], vec![])
+            .await
+            .unwrap();
+        let publication = Publication::from_bytes(&store.load_pending().unwrap()[0].bytes).unwrap();
+        let mut policy = auth.policy();
+        let verified =
+            cpfl::verify_publication(&publication, &policy, &auth.schema, 1, &clean).unwrap();
+        assert_eq!(verified.authority_until(), expected);
+        policy.policy.now = expected - 1;
+        assert_eq!(
+            cpfl::verify_publication(&publication, &policy, &auth.schema, 1, &clean)
+                .unwrap()
+                .authority_until(),
+            expected
+        );
+        policy.policy.now = expected;
+        assert!(matches!(
+            cpfl::verify_publication(&publication, &policy, &auth.schema, 1, &clean),
+            Err(Error::Admission)
+        ));
+    }
+    // Current Guard requires every included gate to cover the signed credential,
+    // even when the action does not require it. Profile must preserve that rule.
+    for gate in [1099, 1100, 1199] {
+        let mut draft = Draft::new("alice".into(), profile()).unwrap();
+        let mut device = device();
+        let mut auth = Auth::new(&mut draft, &device);
+        auth.credential = resign(
+            &auth,
+            &auth.credential,
+            Kind::Credential,
+            1000,
+            1200,
+            Some(gate),
+        );
+        assert!(matches!(
+            prepare(&draft, &auth, &mut device, &cipher(), 0, 1).await,
+            Err(Error::Admission)
+        ));
+    }
+});
+
 shared!(signed_projection_checkpoint_and_peer_round_trip, {
     let mut draft = Draft::new("alice".into(), profile()).unwrap();
     let mut device = device();
@@ -219,18 +432,49 @@ shared!(signed_projection_checkpoint_and_peer_round_trip, {
     );
     let public: cgrd::Bundle = serde_json::from_slice(&publication.public_bundle).unwrap();
     let body: cgrd::BundleContent = serde_json::from_slice(&public.payload).unwrap();
+    assert_eq!(body.hpke_key, Some(device.hpke_public_key().unwrap()));
+    let recipient = cgrd::verify_recipient_with_contact(
+        &public,
+        &body.member,
+        &auth.policy(),
+        &auth.schema,
+        &clean,
+    )
+    .unwrap();
+    assert_eq!(recipient.hpke_key(), &device.hpke_public_key().unwrap());
+    let mut replaced = body.clone();
+    replaced.hpke_key = Some([87; 32]);
+    let tampered = cgrd::Bundle {
+        payload: serde_json::to_vec(&replaced).unwrap(),
+        signature: public.signature.clone(),
+    };
+    assert!(
+        cgrd::verify_recipient_with_contact(
+            &tampered,
+            &body.member,
+            &auth.policy(),
+            &auth.schema,
+            &clean,
+        )
+        .is_err()
+    );
     assert!(matches!(body.profile, cgrd::Profile::Public(_)));
     assert_eq!(body.openings.len(), 1);
     assert_eq!(body.openings[0].field, "age");
-    let read_key = cnvl::ReadKey::unwrap(
-        &cipher,
-        verified.context(),
-        store
-            .read("profile.keys", &1u64.to_be_bytes())
-            .unwrap()
+    let envelope_keys = EnvelopeKeys::new(&device, &auth);
+    let read_key = envelope_keys
+        .custody()
+        .restore(
+            verified.context(),
+            &cnvl::WrappedReadKey::from_bytes(
+                store
+                    .read("profile.keys", &1u64.to_be_bytes())
+                    .unwrap()
+                    .unwrap(),
+            )
             .unwrap(),
-    )
-    .unwrap();
+        )
+        .unwrap();
     let full = cpfl::open_full(
         &publication,
         &verified,
@@ -526,9 +770,8 @@ shared!(draft_and_publication_resource_refusals, {
                 reachability,
                 0,
                 &mut device,
-                &cipher,
+                &EnvelopeKeys::new(&Device(SigningKey::from_bytes(&[22; 32])), &auth).custody(),
                 &PortableCodec,
-                &mut SystemEntropy,
                 &clean
             ),
             Err(Error::Invalid)
@@ -578,7 +821,13 @@ async fn fixture_publication(
     community: &str,
     member: &str,
     seed: u8,
-) -> (Auth, Device, Publication, cnvl::ReadKey, cgrd::Bundle) {
+) -> (
+    Auth,
+    Device,
+    Publication,
+    cnvl::WrappedReadKey,
+    cgrd::Bundle,
+) {
     let mut answers = profile();
     answers.community = community.into();
     let mut draft = Draft::new(member.into(), answers).unwrap();
@@ -597,15 +846,20 @@ async fn fixture_publication(
     let publication = Publication::from_bytes(&store.load_pending().unwrap()[0].bytes).unwrap();
     let verified =
         cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, 1, &clean).unwrap();
-    let key = cnvl::ReadKey::unwrap(
-        &cipher,
-        verified.context(),
-        store
-            .read("profile.keys", &1u64.to_be_bytes())
-            .unwrap()
+    let envelope_keys = EnvelopeKeys::new(&device, &auth);
+    let key = envelope_keys
+        .custody()
+        .restore(
+            verified.context(),
+            &cnvl::WrappedReadKey::from_bytes(
+                store
+                    .read("profile.keys", &1u64.to_be_bytes())
+                    .unwrap()
+                    .unwrap(),
+            )
             .unwrap(),
-    )
-    .unwrap();
+        )
+        .unwrap();
     let packed = cnvl::open(
         &cnvl::Envelope::from_bytes(&publication.envelope).unwrap(),
         &key,
@@ -618,9 +872,10 @@ async fn fixture_publication(
             .unwrap(),
     )
     .unwrap();
-    (auth, device, publication, key, full)
+    let wrapped = key.wrap().unwrap();
+    (auth, device, publication, wrapped, full)
 }
-fn resign(publication: &mut Publication, device: &mut Device) {
+fn resign_publication(publication: &mut Publication, device: &mut Device) {
     let mut transcript: Transcript = serde_json::from_slice(&publication.transcript).unwrap();
     transcript.public_digest = *blake3::hash(&publication.public_bundle).as_bytes();
     transcript.encrypted_digest = *blake3::hash(&publication.envelope).as_bytes();
@@ -630,32 +885,30 @@ fn resign(publication: &mut Publication, device: &mut Device) {
         .unwrap()
         .to_vec();
 }
-fn reseal(
+fn reseal<'key>(
+    custody: &cnvl::Custodian<'key>,
     publication: &mut Publication,
     device: &mut Device,
     context: cnvl::Context,
     full: &cgrd::Bundle,
-) -> cnvl::ReadKey {
+) -> cnvl::ReadKey<'key> {
     let packed = PortableCodec
         .pack(&serde_json::to_vec(full).unwrap())
         .unwrap();
-    let (envelope, key) = cnvl::seal(
-        cnvl::SealKey::generate(&mut SystemEntropy).unwrap(),
-        context,
-        &packed,
-        &mut SystemEntropy,
-    )
-    .unwrap();
+    let (envelope, key) = custody.seal(context, &packed).unwrap();
     publication.envelope = envelope.to_bytes().unwrap();
-    resign(publication, device);
+    resign_publication(publication, device);
     key
 }
 shared!(full_presentations_cannot_be_spliced_or_relabelled, {
-    let (auth, mut device, publication, key, full) =
+    let (auth, mut device, publication, wrapped, full) =
         fixture_publication("garden", "alice", 22).await;
     let original = publication.to_bytes().unwrap();
     let verified =
         cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, 1, &clean).unwrap();
+    let envelope_keys = EnvelopeKeys::new(&device, &auth);
+    let custody = envelope_keys.custody();
+    let key = custody.restore(verified.context(), &wrapped).unwrap();
     for field in 0..2 {
         let mut tampered = Publication::from_bytes(&original).unwrap();
         if field == 0 {
@@ -684,6 +937,7 @@ shared!(full_presentations_cannot_be_spliced_or_relabelled, {
         let (other_auth, _, _, _, other_full) = fixture_publication(community, member, seed).await;
         let mut substituted = Publication::from_bytes(&original).unwrap();
         let other_key = reseal(
+            &custody,
             &mut substituted,
             &mut device,
             verified.context(),
@@ -706,7 +960,13 @@ shared!(full_presentations_cannot_be_spliced_or_relabelled, {
     }
     let mut substituted = Publication::from_bytes(&original).unwrap();
     let public: cgrd::Bundle = serde_json::from_slice(&substituted.public_bundle).unwrap();
-    let wrong_scope_key = reseal(&mut substituted, &mut device, verified.context(), &public);
+    let wrong_scope_key = reseal(
+        &custody,
+        &mut substituted,
+        &mut device,
+        verified.context(),
+        &public,
+    );
     let bound =
         cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean).unwrap();
     assert!(matches!(
@@ -734,7 +994,13 @@ shared!(full_presentations_cannot_be_spliced_or_relabelled, {
         .sign(&cgrd::binding_bytes(&edited.payload))
         .unwrap()
         .to_vec();
-    let edited_key = reseal(&mut substituted, &mut device, verified.context(), &edited);
+    let edited_key = reseal(
+        &custody,
+        &mut substituted,
+        &mut device,
+        verified.context(),
+        &edited,
+    );
     let bound =
         cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean).unwrap();
     assert!(matches!(
@@ -750,7 +1016,13 @@ shared!(full_presentations_cannot_be_spliced_or_relabelled, {
         Err(Error::Invalid)
     ));
     edited.signature[0] ^= 1;
-    let edited_key = reseal(&mut substituted, &mut device, verified.context(), &edited);
+    let edited_key = reseal(
+        &custody,
+        &mut substituted,
+        &mut device,
+        verified.context(),
+        &edited,
+    );
     let bound =
         cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean).unwrap();
     assert!(matches!(
@@ -767,14 +1039,22 @@ shared!(full_presentations_cannot_be_spliced_or_relabelled, {
     ));
     let mut wrong_context = verified.context();
     wrong_context.owner = "other".into();
-    reseal(&mut substituted, &mut device, wrong_context, &full);
+    let mut wrong_owner = EnvelopeKeys::new(&device, &auth);
+    wrong_owner.member = "other".into();
+    reseal(
+        &wrong_owner.custody(),
+        &mut substituted,
+        &mut device,
+        wrong_context,
+        &full,
+    );
     assert!(matches!(
         cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean),
         Err(Error::Invalid)
     ));
     substituted = Publication::from_bytes(&original).unwrap();
     substituted.public_bundle = serde_json::to_vec(&full).unwrap();
-    resign(&mut substituted, &mut device);
+    resign_publication(&mut substituted, &mut device);
     assert!(matches!(
         cpfl::verify_publication(&substituted, &auth.policy(), &auth.schema, 1, &clean),
         Err(Error::Invalid)
@@ -807,6 +1087,48 @@ shared!(delayed_commit_rechecks_current_admission_and_clock, {
     }
 });
 
+shared!(
+    authorization_is_synchronous_and_the_write_is_fenced_afterwards,
+    {
+        let mut draft = Draft::new("alice".into(), profile()).unwrap();
+        let mut device = device();
+        let auth = Auth::new(&mut draft, &device);
+        let cipher = cipher();
+        let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+            .await
+            .unwrap();
+        // Stale policy is refused at the synchronous step, before any store access.
+        let mut stale = auth.validation();
+        stale.policy.policy.now = 1099;
+        assert_eq!(
+            prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+                .await
+                .unwrap()
+                .authorize(stale)
+                .err(),
+            Some(Error::Admission)
+        );
+        // The authorized candidate holds no policy borrow and commits in a later await.
+        let authorized = prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+            .await
+            .unwrap()
+            .authorize(auth.validation())
+            .unwrap();
+        assert!(authorized.commit(&mut store, [1; 32], vec![]).await.is_ok());
+        assert_eq!(store.load_pending().unwrap().len(), 1);
+        // The store version fence still rejects a candidate prepared on an old version.
+        let old = prepare(&draft, &auth, &mut device, &cipher, 0, 2)
+            .await
+            .unwrap()
+            .authorize(auth.validation())
+            .unwrap();
+        assert_eq!(
+            old.commit(&mut store, [2; 32], vec![]).await,
+            Err(Error::Storage)
+        );
+    }
+);
+
 shared!(current_contact_check_covers_the_private_projection, {
     let mut draft = Draft::new("alice".into(), profile()).unwrap();
     let mut device = device();
@@ -838,23 +1160,14 @@ shared!(current_contact_check_covers_the_private_projection, {
     assert!(store.load_pending().unwrap().is_empty());
 });
 
-/// Fail only the external entropy source; all preceding crypto is real.
-struct FailEntropy(usize);
-impl ckmg::Entropy for FailEntropy {
-    fn fill(&mut self, bytes: &mut [u8]) -> Result<(), ckmg::Error> {
-        if self.0 == 0 {
-            return Err(ckmg::Error::Unavailable);
-        }
-        self.0 -= 1;
-        ckmg::Entropy::fill(&mut SystemEntropy, bytes)
-    }
-}
-shared!(envelope_entropy_failures_never_release_a_candidate, {
+shared!(unrelated_envelope_custody_never_releases_a_candidate, {
     let mut draft = Draft::new("alice".into(), profile()).unwrap();
     let mut device = device();
     let auth = Auth::new(&mut draft, &device);
-    for fail_after in 0..3 {
-        let result = draft.prepare_publication(
+    let mut wrong = EnvelopeKeys::new(&device, &auth);
+    wrong.hpke[0] ^= 128;
+    assert!(matches!(
+        draft.prepare_publication(
             &auth.credential,
             &auth.policy(),
             &auth.schema,
@@ -863,13 +1176,12 @@ shared!(envelope_entropy_failures_never_release_a_candidate, {
             vec![],
             0,
             &mut device,
-            &cipher(),
+            &wrong.custody(),
             &PortableCodec,
-            &mut FailEntropy(fail_after),
             &clean,
-        );
-        assert!(matches!(result, Err(Error::Crypto)));
-    }
+        ),
+        Err(Error::Crypto)
+    ));
 });
 
 shared!(current_schema_rules_and_locked_storage_refuse, {
@@ -887,9 +1199,8 @@ shared!(current_schema_rules_and_locked_storage_refuse, {
             vec![],
             0,
             &mut device,
-            &cipher,
+            &EnvelopeKeys::new(&Device(SigningKey::from_bytes(&[22; 32])), &auth).custody(),
             &PortableCodec,
-            &mut SystemEntropy,
             &clean,
         ),
         Err(Error::Admission)
@@ -924,7 +1235,7 @@ shared!(current_schema_rules_and_locked_storage_refuse, {
         member: String::new(),
     }];
     publication.transcript = serde_json::to_vec(&transcript).unwrap();
-    resign(&mut publication, &mut device);
+    resign_publication(&mut publication, &mut device);
     assert!(matches!(
         cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, 1, &clean),
         Err(Error::Schema)
@@ -937,3 +1248,251 @@ shared!(current_schema_rules_and_locked_storage_refuse, {
 fn profiling_runtime_is_linked() {
     let _ = browser_coverage_runtime::__owned_test_module_signature();
 }
+
+shared!(
+    committed_publication_uses_actual_store_and_revalidates_original_authority,
+    {
+        let mut draft = Draft::new("alice".into(), profile()).unwrap();
+        let mut device = device();
+        let auth = Auth::new(&mut draft, &device);
+        let cipher = cipher();
+        let backend = cwst::backend::Memory::new();
+        let mut store = cwst::Store::create(backend.clone(), &cipher, "garden")
+            .await
+            .unwrap();
+        let binding = ckmg::Binding::new("garden", "alice").unwrap();
+        assert!(
+            cpfl::load_current_committed(&store, &binding, auth.validation())
+                .unwrap()
+                .is_none()
+        );
+        prepare(&draft, &auth, &mut device, &cipher, 0, 1)
+            .await
+            .unwrap()
+            .commit_publication(&mut store, auth.validation(), [31; 32], vec![])
+            .await
+            .unwrap();
+        let wire = store.load_pending().unwrap()[0].bytes.clone();
+        {
+            let committed = cpfl::load_current_committed(&store, &binding, auth.validation())
+                .unwrap()
+                .unwrap();
+            assert_eq!(committed.bytes(), wire);
+            assert_eq!(committed.publication().to_bytes().unwrap(), wire);
+            assert_eq!(committed.verified().transcript().member, "alice");
+            assert_eq!(committed.verified().transcript().revision, 1);
+            assert_eq!(committed.checkpoint(), 1);
+        }
+        assert!(matches!(
+            cpfl::load_committed(&store, &binding, auth.validation(), 2),
+            Err(Error::Invalid)
+        ));
+        for foreign in [
+            ckmg::Binding::new("garden", "other").unwrap(),
+            ckmg::Binding::new("other", "alice").unwrap(),
+        ] {
+            assert!(matches!(
+                cpfl::load_current_committed(&store, &foreign, auth.validation()),
+                Err(Error::Invalid)
+            ));
+        }
+        let mut expired = auth.validation();
+        expired.policy.policy.now = 2000;
+        assert!(matches!(
+            cpfl::load_current_committed(&store, &binding, expired),
+            Err(Error::Admission)
+        ));
+        let mut no_detector = auth.validation();
+        let unavailable = |_: &str| cshm::ContactCheck::Unavailable;
+        no_detector.contact = &unavailable;
+        assert!(cpfl::load_current_committed(&store, &binding, no_detector).is_err());
+        store.ack_output(1, [32; 32], [31; 32]).await.unwrap();
+        store.lock_in_place();
+        assert!(matches!(
+            cpfl::load_current_committed(&store, &binding, auth.validation()),
+            Err(Error::Storage)
+        ));
+        let mut store = cwst::Store::open(backend, &cipher, "garden").await.unwrap();
+        assert_eq!(
+            cpfl::load_current_committed(&store, &binding, auth.validation())
+                .unwrap()
+                .unwrap()
+                .bytes(),
+            wire
+        );
+        prepare(&draft, &auth, &mut device, &cipher, 2, 2)
+            .await
+            .unwrap()
+            .commit_publication(&mut store, auth.validation(), [33; 32], vec![])
+            .await
+            .unwrap();
+        assert_eq!(
+            cpfl::load_current_committed(&store, &binding, auth.validation())
+                .unwrap()
+                .unwrap()
+                .verified()
+                .transcript()
+                .revision,
+            2
+        );
+        store
+            .commit(
+                3,
+                [34; 32],
+                &[cwst::Change::Put {
+                    owner: "profile",
+                    key: b"publication",
+                    value: b"malformed",
+                }],
+                &[],
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            cpfl::load_current_committed(&store, &binding, auth.validation()),
+            Err(Error::Invalid)
+        ));
+    }
+);
+
+shared!(
+    authenticated_hpke_release_keeps_keys_in_original_bound_custody,
+    {
+        let (alice_auth, alice_device, alice, alice_wrapped, _) =
+            fixture_publication("garden", "alice", 22).await;
+        let (bob_auth, mut bob_device, bob, _, _) = fixture_publication("garden", "bob", 23).await;
+        let alice_keys = EnvelopeKeys::new(&alice_device, &alice_auth);
+        let bob_keys = EnvelopeKeys::new(&bob_device, &bob_auth);
+        let alice_custody = alice_keys.custody();
+        let bob_custody = bob_keys.custody();
+        let alice_bundle: cgrd::Bundle = serde_json::from_slice(&alice.public_bundle).unwrap();
+        let bob_bundle: cgrd::Bundle = serde_json::from_slice(&bob.public_bundle).unwrap();
+        let sender = cgrd::verify_recipient_with_contact(
+            &alice_bundle,
+            "alice",
+            &alice_auth.policy(),
+            &alice_auth.schema,
+            &clean,
+        )
+        .unwrap();
+        let recipient = cgrd::verify_recipient_with_contact(
+            &bob_bundle,
+            "bob",
+            &bob_auth.policy(),
+            &bob_auth.schema,
+            &clean,
+        )
+        .unwrap();
+        let verified =
+            cpfl::verify_publication(&alice, &alice_auth.policy(), &alice_auth.schema, 1, &clean)
+                .unwrap();
+        let context = verified.context();
+        let reader = alice_custody
+            .restore(context.clone(), &alice_wrapped)
+            .unwrap();
+        let a_wire = alice.to_bytes().unwrap();
+        let b_wire = bob.to_bytes().unwrap();
+        let binding = cnvl::TransferContext::new(&a_wire, &b_wire, 1, 1, [9; 32]).unwrap();
+        let transfer = reader.release(&sender, &recipient, &binding).unwrap();
+        let wire = transfer.to_bytes().unwrap();
+        let transfer = cnvl::KeyTransfer::from_bytes(&wire).unwrap();
+        let received = bob_custody
+            .receive(&transfer, &context, &sender, &recipient, &binding)
+            .unwrap();
+        let opened = cpfl::open_full(
+            &alice,
+            &verified,
+            &received,
+            &PortableCodec,
+            &alice_auth.policy(),
+            &alice_auth.schema,
+            &clean,
+        )
+        .unwrap();
+        assert_eq!(opened, profile());
+        // Recipient persistence belongs to recipient custody; the original sender
+        // cannot reopen it using even the same test storage bytes and another member.
+        let received_wrapped = received.wrap().unwrap();
+        assert!(
+            alice_custody
+                .restore(context.clone(), &received_wrapped)
+                .is_err()
+        );
+        let reopened = bob_custody
+            .restore(context.clone(), &received_wrapped)
+            .unwrap();
+        assert!(reopened.release(&recipient, &sender, &binding).is_err());
+        assert!(
+            alice_custody
+                .receive(&transfer, &context, &sender, &recipient, &binding)
+                .is_err()
+        );
+        for changed in [
+            cnvl::TransferContext::new(&a_wire, &b_wire, 1, 1, [10; 32]).unwrap(),
+            cnvl::TransferContext::new(&b_wire, &a_wire, 1, 1, [9; 32]).unwrap(),
+            cnvl::TransferContext::new(&a_wire, &b_wire, 2, 1, [9; 32]).unwrap(),
+            cnvl::TransferContext::new(&a_wire, &b_wire, 1, 2, [9; 32]).unwrap(),
+        ] {
+            assert!(
+                bob_custody
+                    .receive(&transfer, &context, &sender, &recipient, &changed)
+                    .is_err()
+            );
+        }
+        for field in ["enc", "ciphertext"] {
+            let mut changed: serde_json::Value = serde_json::from_slice(&wire).unwrap();
+            changed[field][0] = json!(changed[field][0].as_u64().unwrap() ^ 1);
+            let altered =
+                cnvl::KeyTransfer::from_bytes(&serde_json::to_vec(&changed).unwrap()).unwrap();
+            assert!(
+                bob_custody
+                    .receive(&altered, &context, &sender, &recipient, &binding)
+                    .is_err()
+            );
+        }
+        let mut body: cgrd::BundleContent = serde_json::from_slice(&bob_bundle.payload).unwrap();
+        let mut low_order = [0; 32];
+        low_order[0] = 1;
+        body.hpke_key = Some(low_order);
+        let payload = serde_json::to_vec(&body).unwrap();
+        let low_order_bundle = cgrd::Bundle {
+            signature: bob_device
+                .sign(&cgrd::binding_bytes(&payload))
+                .unwrap()
+                .to_vec(),
+            payload,
+        };
+        let low_order_recipient = cgrd::verify_recipient_with_contact(
+            &low_order_bundle,
+            "bob",
+            &bob_auth.policy(),
+            &bob_auth.schema,
+            &clean,
+        )
+        .unwrap();
+        assert!(
+            reader
+                .release(&sender, &low_order_recipient, &binding)
+                .is_err()
+        );
+        let mut expired = alice_auth.policy();
+        expired.policy.now = 2000;
+        assert!(
+            cgrd::verify_recipient_with_contact(
+                &alice_bundle,
+                "alice",
+                &expired,
+                &alice_auth.schema,
+                &clean
+            )
+            .is_err()
+        );
+        // HPKE is stateless: Exchange MUST fence duplicate nonce adoption through
+        // its actual Store CAS/receipt. This crypto vector does not claim that gate.
+        assert!(
+            bob_custody
+                .receive(&transfer, &context, &sender, &recipient, &binding)
+                .is_ok()
+        );
+    }
+);
