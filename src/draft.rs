@@ -268,6 +268,7 @@ impl Draft {
         custody: &cnvl::Custodian<'_>,
         codec: &impl ProfileCodec,
         contact: &impl Fn(&str) -> cshm::ContactCheck,
+        sponsors: cgrd::Sponsors<'_>,
     ) -> Result<Candidate, Error> {
         if revision == 0
             || key_generation == 0
@@ -299,12 +300,14 @@ impl Draft {
             None,
             signer,
         )?;
-        for bundle in [&public, &full] {
-            if !cgrd::check_published_with_contact(bundle, policy, signed_schema, contact)
+        // An endorsement is refused here unless its sponsor vouches now; Guard
+        // also requires the bundle to record that verification.
+        if !cgrd::check_published_with_sponsors(&public, policy, signed_schema, contact, sponsors)
+            .is_admitted()
+            || !cgrd::check_published_with_contact(&full, policy, signed_schema, contact)
                 .is_admitted()
-            {
-                return Err(Error::Admission);
-            }
+        {
+            return Err(Error::Admission);
         }
         let public_bundle = encode(&public)?;
         let full_bytes = Zeroizing::new(encode(&full)?);
@@ -377,6 +380,7 @@ impl Draft {
             credential: credential.to_vec(),
             profile,
             openings,
+            vouched_verified: vouched_by.is_some(),
             vouched_by,
         })?;
         let signature = signer.sign(&cgrd::binding_bytes(&payload))?.to_vec();
