@@ -1496,3 +1496,50 @@ shared!(
         );
     }
 );
+
+async fn published_public(
+    draft: &Draft,
+    auth: &Auth,
+    device: &mut Device,
+    revision: u64,
+) -> cgrd::Bundle {
+    let cipher = cipher();
+    let mut store = cwst::Store::create(cwst::backend::Memory::new(), &cipher, "garden")
+        .await
+        .unwrap();
+    let candidate = prepare(draft, auth, device, &cipher, 0, revision)
+        .await
+        .unwrap();
+    candidate
+        .commit_publication(&mut store, auth.validation(), [1; 32], vec![])
+        .await
+        .unwrap();
+    let wire = store.load_pending().unwrap()[0].bytes.clone();
+    let publication = Publication::from_bytes(&wire).unwrap();
+    // The verified publication binds the public digest, so the field is signed.
+    cpfl::verify_publication(&publication, &auth.policy(), &auth.schema, revision, &clean).unwrap();
+    serde_json::from_slice(&publication.public_bundle).unwrap()
+}
+
+shared!(the_system_endorsement_is_public_signed_and_one_way, {
+    let mut draft = Draft::new("alice".into(), profile()).unwrap();
+    let mut device = device();
+    let auth = Auth::new(&mut draft, &device);
+    assert!(draft.set_vouched_by(Some(vec![])).is_err());
+    assert!(
+        draft
+            .set_vouched_by(Some(vec![1; cgrd::MAX_ENDORSEMENT_BYTES + 1]))
+            .is_err()
+    );
+    let wire = vec![9u8; 100];
+    draft.set_vouched_by(Some(wire.clone())).unwrap();
+    let public = published_public(&draft, &auth, &mut device, 1).await;
+    assert_eq!(cgrd::vouched_by(&public), Some(wire));
+    // Editing the answers never touches the system field.
+    draft.edit(profile()).unwrap();
+    assert!(draft.vouched_by().is_some());
+    // Hidden mode: clearing removes it from the next publication.
+    draft.set_vouched_by(None).unwrap();
+    let public = published_public(&draft, &auth, &mut device, 1).await;
+    assert_eq!(cgrd::vouched_by(&public), None);
+});

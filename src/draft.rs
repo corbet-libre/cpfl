@@ -71,6 +71,10 @@ struct DraftState {
     profile: cshm::Profile,
     openings: Vec<cgrd::Opening>,
     rules: Vec<cgrd::Rule>,
+    /// System field: the sponsor's signed endorsement, published only in the
+    /// public bundle. It is not an answer and `edit` never touches it.
+    #[serde(default)]
+    vouched_by: Option<Vec<u8>>,
 }
 /// Private draft custody; it deliberately exposes no general serializer for salts.
 pub struct Draft {
@@ -100,6 +104,7 @@ impl Draft {
                 profile,
                 openings: vec![],
                 rules: vec![],
+                vouched_by: None,
             },
         };
         encode(&draft.state)?;
@@ -141,6 +146,23 @@ impl Draft {
         encode(&rules)?;
         self.state.rules = rules;
         Ok(())
+    }
+    /// Set or clear the system endorsement ("vouched for by"). `None` removes it,
+    /// which is the one-way hidden-mode rule. The bytes are opaque here; display
+    /// verifies them against the sponsor's lineage.
+    pub fn set_vouched_by(&mut self, endorsement: Option<Vec<u8>>) -> Result<(), Error> {
+        if endorsement
+            .as_ref()
+            .is_some_and(|bytes| bytes.is_empty() || bytes.len() > cgrd::MAX_ENDORSEMENT_BYTES)
+        {
+            return Err(Error::Limit);
+        }
+        self.state.vouched_by = endorsement;
+        Ok(())
+    }
+    /// The endorsement currently set, if any.
+    pub fn vouched_by(&self) -> Option<&[u8]> {
+        self.state.vouched_by.as_deref()
     }
     /// Structural current-schema validation, never a credential admission.
     pub fn validate(
@@ -267,12 +289,14 @@ impl Draft {
             credential,
             cgrd::Profile::Public(public_profile),
             public_openings,
+            self.state.vouched_by.clone(),
             signer,
         )?;
         let full = self.bundle(
             credential,
             cgrd::Profile::Full(self.state.profile.clone()),
             self.state.openings.clone(),
+            None,
             signer,
         )?;
         for bundle in [&public, &full] {
@@ -342,6 +366,7 @@ impl Draft {
         credential: &[u8],
         profile: cgrd::Profile,
         openings: Vec<cgrd::Opening>,
+        vouched_by: Option<Vec<u8>>,
         signer: &mut impl DeviceSigner,
     ) -> Result<cgrd::Bundle, Error> {
         let payload = encode(&cgrd::BundleContent {
@@ -352,6 +377,7 @@ impl Draft {
             credential: credential.to_vec(),
             profile,
             openings,
+            vouched_by,
         })?;
         let signature = signer.sign(&cgrd::binding_bytes(&payload))?.to_vec();
         Ok(cgrd::Bundle { payload, signature })
