@@ -13,15 +13,15 @@ crate-type = ["rlib"]
 test = false
 
 [dependencies]
-cprz = { git = "https://git.corbet.ch/corbet-foss/cprz.git", branch = "v01", default-features = false }
-cprz-pad = { git = "https://git.corbet.ch/corbet-foss/cprz.git", branch = "v01" }
+cprz = { git = "https://git.corbet.ch/corbet-foss/cprz.git", branch = "main", default-features = false }
+cprz-pad = { git = "https://git.corbet.ch/corbet-foss/cprz.git", branch = "main" }
 cgrd = { git = "https://git.corbet.ch/corbet-foss/cgrd", branch = "main", default-features = false }
 cshm = { git = "https://git.corbet.ch/corbet-foss/cshm", branch = "main" }
 csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", default-features = false }
 cpns = { git = "https://git.corbet.ch/corbet-foss/cpns", branch = "main", default-features = false }
-ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01", features = ["profile-envelope"] }
-cnvl = { git = "https://git.corbet.ch/corbet-foss/cnvl.git", branch = "v01" }
-cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "main", features = ["profile-envelope"] }
+cnvl = { git = "https://git.corbet.ch/corbet-foss/cnvl.git", branch = "main" }
+cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "main" }
 blake3 = "1"
 ed25519-dalek = { version = "3", default-features = false, features = ["fast"] }
 serde = { version = "1", features = ["derive"] }
