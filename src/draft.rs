@@ -75,6 +75,10 @@ struct DraftState {
     /// public bundle. It is not an answer and `edit` never touches it.
     #[serde(default)]
     vouched_by: Option<Vec<u8>>,
+    /// System field: lineage evidence for `vouched_by` (`cvch::link::Snapshot` wire form),
+    /// published only in the public bundle together with the endorsement.
+    #[serde(default)]
+    vouched_snapshot: Option<Vec<u8>>,
 }
 /// Private draft custody; it deliberately exposes no general serializer for salts.
 pub struct Draft {
@@ -105,6 +109,7 @@ impl Draft {
                 openings: vec![],
                 rules: vec![],
                 vouched_by: None,
+                vouched_snapshot: None,
             },
         };
         encode(&draft.state)?;
@@ -158,6 +163,18 @@ impl Draft {
             return Err(Error::Limit);
         }
         self.state.vouched_by = endorsement;
+        Ok(())
+    }
+    /// Set or clear the lineage snapshot that accompanies the endorsement. It is dropped
+    /// whenever the endorsement is, so hidden mode leaves nothing behind.
+    pub fn set_vouched_snapshot(&mut self, snapshot: Option<Vec<u8>>) -> Result<(), Error> {
+        if snapshot
+            .as_ref()
+            .is_some_and(|bytes| bytes.is_empty() || bytes.len() > cgrd::MAX_SNAPSHOT_BYTES)
+        {
+            return Err(Error::Limit);
+        }
+        self.state.vouched_snapshot = snapshot;
         Ok(())
     }
     /// The endorsement currently set, if any.
@@ -291,12 +308,17 @@ impl Draft {
             cgrd::Profile::Public(public_profile),
             public_openings,
             self.state.vouched_by.clone(),
+            self.state
+                .vouched_by
+                .as_ref()
+                .and(self.state.vouched_snapshot.clone()),
             signer,
         )?;
         let full = self.bundle(
             credential,
             cgrd::Profile::Full(self.state.profile.clone()),
             self.state.openings.clone(),
+            None,
             None,
             signer,
         )?;
@@ -370,6 +392,7 @@ impl Draft {
         profile: cgrd::Profile,
         openings: Vec<cgrd::Opening>,
         vouched_by: Option<Vec<u8>>,
+        vouched_snapshot: Option<Vec<u8>>,
         signer: &mut impl DeviceSigner,
     ) -> Result<cgrd::Bundle, Error> {
         let payload = encode(&cgrd::BundleContent {
@@ -382,6 +405,7 @@ impl Draft {
             openings,
             vouched_verified: vouched_by.is_some(),
             vouched_by,
+            vouched_snapshot,
         })?;
         let signature = signer.sign(&cgrd::binding_bytes(&payload))?.to_vec();
         Ok(cgrd::Bundle { payload, signature })

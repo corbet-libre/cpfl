@@ -1566,10 +1566,18 @@ shared!(
         let present = |h: &str| (h == "sponsorname").then(|| vec![key]);
         let wire = endorsement(&sponsor, "sponsorname");
         draft.set_vouched_by(Some(wire.clone())).unwrap();
+        assert!(draft.set_vouched_snapshot(Some(vec![])).is_err());
+        assert!(
+            draft
+                .set_vouched_snapshot(Some(vec![1; cgrd::MAX_SNAPSHOT_BYTES + 1]))
+                .is_err()
+        );
+        draft.set_vouched_snapshot(Some(vec![5; 40])).unwrap();
         let public = published_public(&draft, &auth, &mut device, 1, &present)
             .await
             .unwrap();
         assert_eq!(cgrd::vouched_by(&public), Some(wire));
+        assert_eq!(cgrd::vouched_snapshot(&public), Some(vec![5; 40]));
         assert!(cgrd::vouched_verified(&public));
         // Forgery: a self-signed endorsement naming an absent handle is refused.
         let stranger = SigningKey::from_bytes(&[9; 32]);
@@ -1589,6 +1597,7 @@ shared!(
             .await
             .unwrap();
         assert_eq!(cgrd::vouched_by(&public), None);
+        assert_eq!(cgrd::vouched_snapshot(&public), None, "hidden mode drops the lineage too");
         assert!(!cgrd::vouched_verified(&public));
     }
 );

@@ -194,12 +194,19 @@ pub struct VerifiedPublication {
     hpke_key: Option<[u8; 32]>,
     vouched_by: Option<Vec<u8>>,
     credential: cgrd::VerifiedSponsor,
+    lineage: Option<cgrd::LineageSnapshot>,
 }
 impl VerifiedPublication {
     /// The sponsor endorsement the signed public bundle carries (wire form), unverified
     /// beyond the bundle's own admission; display verifies it against the sponsor.
     pub fn vouched_by(&self) -> Option<&[u8]> {
         self.vouched_by.as_deref()
+    }
+    /// The sponsor's credential as it was when the newcomer received it, present only when
+    /// the carried snapshot verifies against the community key ring as of that time.
+    /// `departed` is set only by positive evidence (the sponsor is on the signed revocation list).
+    pub fn lineage(&self) -> Option<&cgrd::LineageSnapshot> {
+        self.lineage.as_ref()
     }
     /// The charter credential facts of the publishing member (handle, authorized devices),
     /// verified under the same policy as this publication.
@@ -297,6 +304,10 @@ pub fn verify_publication(
         authority_until,
         hpke_key: body.hpke_key,
         vouched_by: cgrd::vouched_by(&bundle),
+        lineage: cgrd::vouched_snapshot(&bundle)
+            .and_then(|snapshot| {
+                cgrd::verify_lineage_snapshot(&snapshot, &body.community, policy).ok()
+            }),
         credential,
     };
     let envelope = cnvl::Envelope::from_bytes(&publication.envelope).map_err(|_| Error::Invalid)?;
