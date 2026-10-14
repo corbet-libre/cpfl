@@ -349,7 +349,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 dependencies = [
  "minicov 0.3.9",
@@ -592,7 +592,7 @@ name = "cpfl"
 version = "0.0.0"
 dependencies = [
  "blake3",
- "browser-coverage-runtime",
+ "browser-coverage-runtime-cpfl",
  "cgrd",
  "ckmg",
  "cnvl",
@@ -2931,7 +2931,7 @@ name = "cvfy"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -2967,7 +2967,7 @@ name = "cnbx"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -2979,7 +2979,7 @@ name = "ctcs"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3015,7 +3015,7 @@ name = "cphn"
 version = "0.1.1"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3027,7 +3027,7 @@ name = "cfyr-browser-tests"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3039,7 +3039,7 @@ name = "csrn"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3051,7 +3051,7 @@ name = "cgrp"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3079,7 +3079,7 @@ name = "cvlk"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3115,7 +3115,7 @@ name = "cprz-video"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3147,7 +3147,7 @@ name = "cblc-private-accounting-fixture"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3163,7 +3163,7 @@ name = "cchr"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -3179,7 +3179,7 @@ name = "cplc"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cpfl"
 version = "0.0.0"
 
 [[patch.unused]]
