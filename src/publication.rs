@@ -192,8 +192,20 @@ pub struct VerifiedPublication {
     participant: cgrd::Participant,
     authority_until: u64,
     hpke_key: Option<[u8; 32]>,
+    vouched_by: Option<Vec<u8>>,
+    credential: cgrd::VerifiedSponsor,
 }
 impl VerifiedPublication {
+    /// The sponsor endorsement the signed public bundle carries (wire form), unverified
+    /// beyond the bundle's own admission; display verifies it against the sponsor.
+    pub fn vouched_by(&self) -> Option<&[u8]> {
+        self.vouched_by.as_deref()
+    }
+    /// The charter credential facts of the publishing member (handle, authorized devices),
+    /// verified under the same policy as this publication.
+    pub fn credential(&self) -> &cgrd::VerifiedSponsor {
+        &self.credential
+    }
     /// Explicit signed recipient metadata, absent only on a legacy publication.
     pub fn hpke_public_key(&self) -> Option<&[u8; 32]> {
         self.hpke_key.as_ref()
@@ -253,6 +265,9 @@ pub fn verify_publication(
         return Err(Error::Admission);
     }
     let body: cgrd::BundleContent = decode(&bundle.payload)?;
+    let credential =
+        cgrd::verify_sponsor_with_contact(&bundle, &body.member, policy, signed_schema, contact)
+            .map_err(|_| Error::Admission)?;
     let authority_until = authority_deadline(policy, signed_schema, &body.credential)?;
     let cgrd::Profile::Public(public) = body.profile else {
         return Err(Error::Invalid);
@@ -281,6 +296,8 @@ pub fn verify_publication(
         participant,
         authority_until,
         hpke_key: body.hpke_key,
+        vouched_by: cgrd::vouched_by(&bundle),
+        credential,
     };
     let envelope = cnvl::Envelope::from_bytes(&publication.envelope).map_err(|_| Error::Invalid)?;
     if !envelope.matches_context(&verified.context()) {
