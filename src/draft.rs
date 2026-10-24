@@ -17,19 +17,20 @@ pub trait DeviceSigner {
     fn sign(&mut self, bytes: &[u8]) -> Result<[u8; 64], Error>;
 }
 
-// This adapter deliberately accepts only the lineage-device capability. Derived
-// purpose signers cannot stand in for the credential-authorized Profile device.
-impl DeviceSigner for ckmg::DeviceEd25519Signer<'_> {
+// This adapter deliberately accepts only Keys' Profile signer. Derived purpose signers
+// cannot stand in for the credential-authorized Profile device; it signs only the Profile
+// publication and Guard bundle formats, and its X25519 key is the certified Profile purpose.
+impl DeviceSigner for ckmg::ProfileSigner<'_> {
     fn public_key(&self) -> [u8; 32] {
         *self.public_key()
     }
 
     fn hpke_public_key(&self) -> Result<[u8; 32], Error> {
-        ckmg::DeviceEd25519Signer::hpke_public_key(self).map_err(|_| Error::Crypto)
+        Ok(ckmg::ProfileSigner::hpke_public_key(self))
     }
 
     fn sign(&mut self, bytes: &[u8]) -> Result<[u8; 64], Error> {
-        ckmg::DeviceEd25519Signer::sign(self, bytes).map_err(|_| Error::Crypto)
+        ckmg::ProfileSigner::sign(self, bytes).map_err(|_| Error::Crypto)
     }
 }
 /// Compression port for cprz's maintained bounded codec and Padme implementation.
