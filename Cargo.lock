@@ -402,6 +402,7 @@ dependencies = [
 [[package]]
 name = "cdht"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cdht.git?branch=main#a07663e051baeef7afc4d5f5c177332bbf647121"
 dependencies = [
  "blake3",
  "capnp",
@@ -418,6 +419,7 @@ dependencies = [
 [[package]]
 name = "cfbk"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cfbk.git?branch=main#5f7dec374f967412b8ffa3ddae1e5a1762b8b5a4"
 
 [[package]]
 name = "cfg-if"
@@ -434,6 +436,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cgrd"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cgrd.git?branch=main#96574900ffdd6287c00fb74c47fd872c412497ca"
 dependencies = [
  "bigdecimal",
  "cpns",
@@ -517,6 +520,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/ckmg.git?branch=main#b521ef1e6e085530d8818037a95bb8e6aaccb495"
 dependencies = [
  "blake3",
  "cdht",
@@ -547,6 +551,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 [[package]]
 name = "cnvl"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cnvl.git?branch=main#e89714bb70dccb88baa6970e81ace50be2b5deb7"
 dependencies = [
  "cgrd",
  "chacha20poly1305",
@@ -614,6 +619,7 @@ dependencies = [
 [[package]]
 name = "cpns"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cpns.git?branch=main#df17e69c80f1e193e498627385bf75de6fd7d8c4"
 dependencies = [
  "getrandom 0.4.3",
  "sha2 0.11.0",
@@ -624,6 +630,7 @@ dependencies = [
 [[package]]
 name = "cprz"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#c7300c8f794205faa54d2e09da784652313616b7"
 dependencies = [
  "cprz-blob",
 ]
@@ -631,6 +638,7 @@ dependencies = [
 [[package]]
 name = "cprz-blob"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#c7300c8f794205faa54d2e09da784652313616b7"
 dependencies = [
  "brotli",
 ]
@@ -638,6 +646,7 @@ dependencies = [
 [[package]]
 name = "cprz-pad"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#c7300c8f794205faa54d2e09da784652313616b7"
 
 [[package]]
 name = "cpufeatures"
@@ -660,6 +669,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/crbk.git?branch=main#da30aeddf5fa4757365af1feea746385c2845636"
 dependencies = [
  "czkp",
  "semver",
@@ -708,6 +718,7 @@ dependencies = [
 [[package]]
 name = "csgn"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/csgn.git?branch=main#ab5ea2ee6672f90c0ef053932c46cb8b237ba626"
 dependencies = [
  "ciborium-ll",
  "coset",
@@ -720,6 +731,7 @@ dependencies = [
 [[package]]
 name = "cshm"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libre/cshm.git?branch=main#65f75befc8e4136eb10d01eddfae1e0ca07fbc0f"
 dependencies = [
  "bigdecimal",
  "jsonschema",
@@ -767,6 +779,7 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
+source = "git+https://git.corbet.ch/corbet-foss/cvch.git?branch=main#b476df20ee7ed5d58bbeb44a8723915d637b18df"
 dependencies = [
  "cfbk",
  "csgn",
@@ -785,6 +798,7 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-foss/cwst.git?branch=main#81e7ee451e37e8256041cf3aa7d1cb717eb9d5c6"
 dependencies = [
  "atomicwrites",
  "blake3",
@@ -807,6 +821,7 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-foss/czkp.git?branch=main#c89b7b5d035aa9db1186bdce6d7f5200e3c01982"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -2877,315 +2892,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[patch.unused]]
-name = "cblv"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cpmt"
-version = "0.2.0"
-
-[[patch.unused]]
-name = "cwlt"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cwlt-engine"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cnvy"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cmeet"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cmeet-e2e"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "clkp"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cgbl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cgth"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cmty"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "crlt"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cvfy"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cbrd"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cthl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "ckyh"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "ctrn"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cbcn"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cthr"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cvld"
-version = "0.2.0"
-
-[[patch.unused]]
-name = "cnbx"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "csrh"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "ctcs"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "crpt"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "ctnd"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cpsd"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cpsd-fuzz"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "crgs"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cvtl"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cmbl"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cphn"
-version = "0.1.1"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cfyr"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cfyr-browser-tests"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "clnk"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "csrn"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cpky"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cgrp"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cgts"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cfrm"
-version = "0.2.0"
-
-[[patch.unused]]
-name = "cdlv"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cmbx"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cmsh"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cvlk"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cvln"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cwvs"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cprz-audio"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cprz-delta"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cprz-image"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cprz-structured"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cprz-text"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cprz-video"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cssr"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cmmr"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cmbr"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cnrl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "clbs"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cblc"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cblc-private-accounting-fixture"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cvlt"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cfry"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cchr"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cmsg"
-version = "0.2.0"
-
-[[patch.unused]]
-name = "cmsg-foyer-fixture"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cplc"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "browser-coverage-runtime-cpfl"
-version = "0.0.0"
-
-[[patch.unused]]
-name = "cxch"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "cswb"
-version = "0.1.0"
