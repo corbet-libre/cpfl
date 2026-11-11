@@ -8,7 +8,7 @@ for path in pathlib.Path(".").rglob("Cargo.toml"):
     def check(node):
         if isinstance(node, dict):
             url = node.get("git", "")
-            if any(org in url for org in ("corbet-foss/", "corbet-libs/")):
+            if any(org in url for org in ("corbet-libre/", "corbet-fsl/")):
                 assert node.get("branch") == "main" and "rev" not in node and "tag" not in node, f"non-main dependency in {path}"
             for value in node.values():
                 check(value)
@@ -16,7 +16,7 @@ for path in pathlib.Path(".").rglob("Cargo.toml"):
 versions = defaultdict(list)
 for package in tomllib.loads(pathlib.Path("Cargo.lock").read_text())["package"]:
     source = package.get("source", "")
-    if any(org in source for org in ("corbet-foss/", "corbet-libs/")):
+    if any(org in source for org in ("corbet-libre/", "corbet-fsl/")):
         assert "?rev=" not in source and "&rev=" not in source, "transitive revision pin"
         assert "?tag=" not in source and "&tag=" not in source, "transitive tag pin"
         assert "?branch=main#" in source, "transitive first-party dependency is not on main"
